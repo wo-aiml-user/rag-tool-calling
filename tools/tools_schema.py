@@ -8,7 +8,7 @@ RETRIEVAL_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "retrieve_documents",
-        "description": "Retrieve relevant documents from the knowledge base to answer user questions. Use this when the user asks about specific documents or topics that might be in the uploaded files.",
+        "description": "Retrieve relevant information from the knowledge base to answer user questions.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -42,10 +42,10 @@ SEARCH_ARTICLES_SCHEMA = {
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of articles to return.",
+                    "description": "Maximum number of articles to return (max 2 sources).",
                     "minimum": 1,
-                    "maximum": 10,
-                    "default": 1
+                    "maximum": 2,
+                    "default": 2
                 }
             },
             "required": ["query"]

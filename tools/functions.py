@@ -23,7 +23,7 @@ def _get_perplexity_client() -> Perplexity:
     return Perplexity(api_key=api_key)
 
 
-def search_articles(query: str, max_results: int = 1) -> List[Dict]:
+def search_articles(query: str, max_results: int = 2) -> List[Dict]:
     """
     Perform a Perplexity search for a single query.
     
@@ -339,7 +339,7 @@ def execute_tool(function_name: str, function_args: Dict, collection_name: Optio
         
         elif function_name == "search_articles":
             query = function_args.get("query", "")
-            max_results = function_args.get("max_results", 1)
+            max_results = function_args.get("max_results", 2)
             
             logger.info(f"[TOOL_EXEC] Searching articles for: '{query}'")
             
@@ -359,7 +359,7 @@ def execute_tool(function_name: str, function_args: Dict, collection_name: Optio
                 result = "\n".join(formatted)
             
             logger.info(f"[TOOL_EXEC] Found {len(results)} articles")
-            logger.info(f"[TOOL_EXEC] Result preview: {result[:200]}...")
+            logger.info(f"[TOOL_EXEC] Result preview: {result}...")
             
             return result, token_usage
         

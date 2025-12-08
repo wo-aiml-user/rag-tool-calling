@@ -90,7 +90,9 @@ async def upload_document(
             "file_ext": file_ext,
             "local_fs_path": local_fs_path,
             "chunks_stored": len(documents),
-            "collection": collection_name
+            "collection": collection_name,
+            "embedding_tokens": result["embedding_tokens"],
+            "rerank_tokens": result["rerank_tokens"]
         },
         201,
     )

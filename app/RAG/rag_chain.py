@@ -128,6 +128,7 @@ async def execute_rag_chain(request: ChatRequest, collection_name: str, settings
             # Format context properly for retrieval tool
             if function_name == "retrieve_documents":
                 formatted_context = f"\n**Retrieved Context:**\n{tool_result}\n"
+                logger.info(f"[RAG_CHAIN] context:{formatted_context}")
                 tool_result = formatted_context
             
             # Add tool result to messages
