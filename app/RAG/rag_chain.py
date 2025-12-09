@@ -170,6 +170,7 @@ async def execute_rag_chain(request: ChatRequest, collection_name: str, settings
         accumulated_context = []
     
     logger.info(f"[RAG_CHAIN] Generated answer length: {len(answer)} characters")
+    logger.info(f"[RAG_CHAIN] Generated answer: {answer}")
     logger.info(f"[RAG_CHAIN] Total token usage: {total_token_usage}")
     
     # Return response with context for formatter

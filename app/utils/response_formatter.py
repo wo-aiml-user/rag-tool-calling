@@ -44,7 +44,7 @@ def format_rag_response(response: Dict, user_query: str) -> Dict:
         is_retrieval = "retrieve_documents" in tool_names
 
         formatted_response = {
-            "response": json_response.get("ai", response_string),
+            "response": json_response.get("ai") or response_string,
             "tool_used": bool(tool_names),
             "tool_name": ", ".join(tool_names) if tool_names else "",
             "meta_data": [],
