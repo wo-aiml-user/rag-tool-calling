@@ -9,15 +9,15 @@ Ensure you have the following installed:
 
 ---
 
-## 🚀 Setup Instructions
+## Setup Instructions
 
-### 1️⃣ Clone the Repository
+### Clone the Repository
 ```bash
 git clone https://github.com/your-repo/your-project.git
 cd your-project
 ```
 
-### 2️⃣ Create a Virtual Environment
+### Create a Virtual Environment
 #### Windows
 ```powershell
 python -m venv venv
@@ -30,7 +30,7 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-### 3️⃣ Install Dependencies
+### Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
@@ -54,7 +54,7 @@ Start the Docker container
 bash standalone_embed.sh start
 ---
 
-## 🚢 Docker Deployment (Recommended)
+## Docker Deployment (Recommended)
 
 Ensure you have Docker and Docker Compose installed.
 
@@ -73,14 +73,14 @@ Docker Compose will start the FastAPI app and a Tika server. Environment variabl
 
 ---
 
-## 💻 Running the Server
+## Running the Server
 ```bash
 python uvicorn_config.py
 ```
 
 ---
 
-## 🚀 Running in Production
+##  Running in Production
 
 Prefer the Docker-based approach above for production. If you need to run without Docker, a `uvicorn_config.py` file is included:
 
@@ -90,21 +90,55 @@ python uvicorn_config.py
 
 ---
 
-## 🔧 Environment Variables
+##  Environment Variables
 You can configure environment-specific settings using a `.env` file.
-
-Create a **.env** file in the project root:
-```ini
-APP_NAME=FastAPI App
-DEBUG=True
-HOST=0.0.0.0
-PORT=8000
-```
+Create a **.env** file in the project root as `.env.example`.
 
 ---
 
 
-## ✅ API Documentation
+## Project Structure
+
+```
+tool_calling/
+├── app/
+│   ├── api/
+│   │   ├── auth/              # Authentication endpoints
+│   │   │   ├── auth_controller.py # Login & Registration logic
+│   │   │   ├── auth_model.py      # User & Token Pydantic models
+│   │   │   └── token.py           # JWT Token generation
+│   │   ├── chat/              # Chat API endpoints and service logic
+│   │   │   ├── services/      # Core chat logic (chat_service.py)
+│   │   │   └── models/        # Pydantic models for chat
+│   │   └── document/          # Document upload and processing API
+│   │       ├── services/      # PDF processing logic (pdf_operation.py)
+│   │       └── models/        # Document models
+│   ├── middleware/            # Application Middleware
+│   │   ├── jwt_auth.py        # JWT Authentication Middleware
+│   │   └── logging.py         # Request/Response Logging
+│   ├── RAG/                   # RAG Pipeline Components
+│   │   ├── rag_chain.py       # Main orchestration logic (LLM + Tools)
+│   │   ├── embedding.py       # Document embedding logic (Voyage AI)
+│   │   ├── chunking.py        # Text chunking strategies
+│   │   ├── vector_store.py    # Milvus connection utilities
+│   │   ├── deepseek_client.py # DeepSeek API client
+│   │   └── prompt.py          # System prompts for the LLM
+│   ├── utils/
+│   │   ├── response_formatter.py # Logic for formatting LLM responses and metadata
+│   │   └── json_parser.py     # Utilities for parsing LLM JSON output
+│   ├── config.py              # Application configuration (loads .env)
+│   └── main.py                # FastAPI entry point
+├── tools/
+│   ├── functions.py           # Tool implementations (Weather, Search, Retrieval)
+│   └── tools_schema.py        # JSON schemas for function calling
+├── logs/                      # Application logs
+├── .env.example               # Template for environment variables
+├── requirements.txt           # Python dependencies
+├── uvicorn_config.py          # Server startup configuration
+└── docker-compose.yml         # Container orchestration (Milvus, Tika)
+```
+
+## API Documentation
 Once the server is running, access the API docs:
 - **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
 - **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
