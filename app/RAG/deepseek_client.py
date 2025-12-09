@@ -42,7 +42,7 @@ class DeepSeekClient:
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
-        temperature: float = 0.7,
+        temperature: float = 0.6,
         max_tokens: Optional[int] = None
     ) -> Any:
         """

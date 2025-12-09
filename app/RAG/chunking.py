@@ -1,7 +1,7 @@
 from loguru import logger
 from typing import List, Optional, Dict, Any
 from fastapi import HTTPException, status
-from app.RAG.document import Document
+from app.RAG.embedding import Document
 import re
 from bs4 import BeautifulSoup
 import spacy

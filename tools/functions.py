@@ -3,12 +3,12 @@ Tool execution functions for DeepSeek function calling.
 All tool implementations with proper token tracking and detailed logging.
 """
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional,Any
 from dotenv import load_dotenv
 from loguru import logger
 from pymilvus import Collection, connections, utility
-from app.RAG.voyage_embeddings import VoyageEmbeddings, VoyageReranker
-from app.RAG.document import Document
+from app.RAG.voyage_embeddings import VoyageEmbeddings
+from app.RAG.embedding import Document
 from app.config import settings
 from perplexity import Perplexity
 import requests
@@ -48,6 +48,7 @@ def search_articles(query: str, max_results: int = 2) -> List[Dict]:
                 "content": getattr(result, 'content', '') or getattr(result, 'snippet', '') or '',
                 "score": getattr(result, 'score', None),
                 "published_date": getattr(result, 'published_date', '') or getattr(result, 'date', '') or '',
+                "type": "search"
             }
             results.append(norm)
         
@@ -80,7 +81,8 @@ def get_current_weather(location: str, unit: str = "celsius") -> Dict:
             "unit": unit,
             "condition": "Partly cloudy",
             "humidity": 65,
-            "wind_speed": 10
+            "wind_speed": 10,
+            "type": "weather"
         }
         return weather_data
     
@@ -109,7 +111,8 @@ def get_current_weather(location: str, unit: str = "celsius") -> Dict:
             "unit": unit,
             "condition": data["weather"][0]["description"],
             "humidity": data["main"]["humidity"],
-            "wind_speed": data["wind"]["speed"]
+            "wind_speed": data["wind"]["speed"],
+            "type": "weather"
         }
         
         logger.info(f"[WEATHER] Successfully fetched weather for {location}")
@@ -125,15 +128,15 @@ def get_current_weather(location: str, unit: str = "celsius") -> Dict:
             "condition": "Data unavailable",
             "humidity": 0,
             "wind_speed": 0,
-            "error": str(e)
+            "error": str(e),
+            "type": "weather"
         }
 
 def retrieve_documents(
     query: str,
     collection_name: str,
     file_ids: Optional[List[str]] = None,
-    top_k: int = 10,
-    rerank_top_k: int = 6
+    top_k: int = 8
 ) -> tuple[List[Document], Dict[str, int]]:
     """
     Retrieve relevant documents from Milvus with token tracking.
@@ -142,8 +145,7 @@ def retrieve_documents(
         query: Search query
         collection_name: Milvus collection name
         file_ids: Optional list of file IDs to filter by
-        top_k: Number of documents to retrieve before reranking
-        rerank_top_k: Number of documents after reranking
+        top_k: Number of documents to retrieve (default: 8)
         
     Returns:
         Tuple of (documents, token_usage)
@@ -151,8 +153,7 @@ def retrieve_documents(
     logger.info(f"[RETRIEVAL] query='{query}' | collection={collection_name} | file_ids={file_ids}")
     
     token_usage = {
-        "embedding_tokens": 0,
-        "rerank_tokens": 0
+        "embedding_tokens": 0
     }
     
     try:
@@ -212,7 +213,7 @@ def retrieve_documents(
         # Convert results to documents
         documents = []
         if results and len(results) > 0:
-            for hit in results[0]:
+            for idx, hit in enumerate(results[0]):
                 doc = Document(
                     page_content=hit.entity.get("text", ""),
                     metadata={
@@ -221,38 +222,11 @@ def retrieve_documents(
                         "file_path": hit.entity.get("file_path", ""),
                         "page_number": hit.entity.get("page_number", ""),
                         "chunk_number": hit.entity.get("chunk_number", 0),
-                        "score": hit.score
+                        "score": hit.score,
+                        "index": idx
                     }
                 )
                 documents.append(doc)
-        
-        logger.info(f"[RETRIEVAL] Found {len(documents)} documents from vector search")
-        
-        # Rerank if we have documents
-        if documents:
-            logger.info(f"[RETRIEVAL] Reranking documents to top {rerank_top_k}...")
-            reranker = VoyageReranker(
-                model="rerank-2",
-                top_k=rerank_top_k,
-                api_key=settings.VOYAGE_API_KEY
-            )
-            
-            doc_contents = [doc.page_content for doc in documents]
-            rerank_result = reranker.rerank(query=query, documents=doc_contents)
-            
-            rerank_tokens = reranker.get_total_tokens()
-            token_usage["rerank_tokens"] = rerank_tokens
-            logger.info(f"[RETRIEVAL] Reranking complete | tokens={rerank_tokens}")
-            
-            # Reorder documents based on rerank results
-            reranked_docs = []
-            for res in rerank_result.results:
-                doc = documents[res.index]
-                doc.metadata["relevance_score"] = res.relevance_score
-                doc.metadata["index"] = len(reranked_docs)
-                reranked_docs.append(doc)
-            
-            documents = reranked_docs[:rerank_top_k]
         
         logger.info(f"[RETRIEVAL] Final result: {len(documents)} documents | total_tokens={token_usage}")
         return documents, token_usage
@@ -291,7 +265,7 @@ def format_documents_for_llm(documents: List[Document]) -> str:
     return "\n".join(formatted)
 
 
-def execute_tool(function_name: str, function_args: Dict, collection_name: Optional[str] = None) -> tuple[str, Dict[str, int]]:
+def execute_tool(function_name: str, function_args: Dict, collection_name: Optional[str] = None) -> tuple[str, Any, Dict[str, int]]:
     """
     Execute a tool function by name and return result with token usage.
     
@@ -301,21 +275,20 @@ def execute_tool(function_name: str, function_args: Dict, collection_name: Optio
         collection_name: Milvus collection name (for retrieval)
         
     Returns:
-        Tuple of (formatted_result, token_usage)
+        Tuple of (formatted_result, raw_context, token_usage)
     """
     logger.info(f"[TOOL_EXEC] Executing {function_name}")
     logger.info(f"[TOOL_EXEC] Arguments: {function_args}")
     
     token_usage = {
-        "embedding_tokens": 0,
-        "rerank_tokens": 0
+        "embedding_tokens": 0
     }
     
     try:
         if function_name == "retrieve_documents":
             if not collection_name:
                 logger.error("[TOOL_EXEC] Collection name required for retrieval")
-                return "Error: Collection name required for document retrieval", token_usage
+                return "Error: Collection name required for document retrieval", [], token_usage
             
             query = function_args.get("query", "")
             file_ids = function_args.get("file_ids")
@@ -335,7 +308,7 @@ def execute_tool(function_name: str, function_args: Dict, collection_name: Optio
             logger.info(f"[TOOL_EXEC] Retrieved {len(documents)} documents | tokens={retrieval_tokens}")
             logger.info(f"[TOOL_EXEC] Result preview: {result}")
             
-            return result, token_usage
+            return result, documents, token_usage
         
         elif function_name == "search_articles":
             query = function_args.get("query", "")
@@ -361,7 +334,7 @@ def execute_tool(function_name: str, function_args: Dict, collection_name: Optio
             logger.info(f"[TOOL_EXEC] Found {len(results)} articles")
             logger.info(f"[TOOL_EXEC] Result preview: {result}...")
             
-            return result, token_usage
+            return result, results, token_usage
         
         elif function_name == "get_current_weather":
             location = function_args.get("location", "")
@@ -381,12 +354,13 @@ def execute_tool(function_name: str, function_args: Dict, collection_name: Optio
             
             logger.info(f"[TOOL_EXEC] Weather result: {result}")
             
-            return result, token_usage
+            return result, [weather], token_usage
         
         else:
             logger.error(f"[TOOL_EXEC] Unknown function: {function_name}")
-            return f"Error: Unknown function '{function_name}'", token_usage
+            return f"Error: Unknown function '{function_name}'", [], token_usage
     
     except Exception as e:
         logger.error(f"[TOOL_EXEC] Error executing {function_name}: {e}")
-        return f"Error executing {function_name}: {str(e)}", token_usage
+        return f"Error executing {function_name}: {str(e)}", [], token_usage
+

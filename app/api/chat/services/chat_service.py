@@ -8,6 +8,8 @@ from app.api.chat.models.chat_model import ChatRequest
 from app.RAG import rag_chain
 
 
+from app.utils.response_formatter import format_rag_response
+
 async def get_chat_response(request: ChatRequest, settings: Settings) -> Dict:
     """
     Generate chat response using DeepSeek with tool calling.
@@ -34,7 +36,21 @@ async def get_chat_response(request: ChatRequest, settings: Settings) -> Dict:
         settings=settings
     )
     
-    logger.info(f"[CHAT_SERVICE] Response generated successfully")
-    logger.info(f"[CHAT_SERVICE] Token usage: {rag_response.get('token_usage', {})}")
+    logger.info(f"[CHAT_SERVICE] RAG chain execution complete")
     
-    return rag_response
+    # Adapt response for formatter (it expects 'answer' key)
+    if "response" in rag_response:
+        rag_response["answer"] = rag_response.pop("response")
+        
+    logger.info(f"[CHAT_SERVICE] Keys for formatter: {list(rag_response.keys())}")
+    logger.info(f"[CHAT_SERVICE] Context size: {len(rag_response.get('context', []))}")
+    logger.info(f"[CHAT_SERVICE] Tool names: {rag_response.get('tool_names', [])}")
+    
+    # Format and clean the response
+    formatted_response = format_rag_response(
+        response=rag_response,
+        user_query=request.user_query
+    )
+    
+    logger.info(f"[CHAT_SERVICE] Response generated and formatted successfully")
+    return formatted_response

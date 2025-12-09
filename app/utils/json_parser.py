@@ -41,7 +41,7 @@ def normalize_list_string(list_str):
     
     return f'[{",".join(normalized)}]'
 
-def parse_json_response(response_string, is_evidence: bool = False):
+def parse_json_response(response_string):
     """Parse JSON response with robust error handling"""
     try:
         # First try direct JSON parsing
@@ -54,49 +54,13 @@ def parse_json_response(response_string, is_evidence: bool = False):
         except json.JSONDecodeError as e:
             logger.info(f"Normal JSON parsing failed and we are going with regex function")
             # Fall back to regex-based parsing for specific fields
-            return extract_fields_with_regex(response_string) if not is_evidence else extract_fields_with_regex_evidence(response_string)
-        
-def extract_fields_with_regex_evidence(text):
-    """
-    Extract JSON object from text using regex.
-    
-    Args:
-        text (str): Text containing JSON object
-        
-    Returns:
-        dict: Extracted JSON object or empty dict if not found
-    """
-    try:
-        # More flexible pattern to match JSON-like structures
-        pattern = r'\{.*?"selected_files"\s*:\s*\[(.*?)\].*?\}'
-        match = re.search(pattern, text, re.DOTALL | re.MULTILINE)
-        
-        if match:
-            # Try to parse the entire matched JSON string
-            full_json_str = match.group(0)
-            try:
-                # First, try direct JSON parsing
-                return json.loads(full_json_str)
-            except json.JSONDecodeError:
-                # If direct parsing fails, try cleaning the JSON
-                # Remove newlines and extra whitespace
-                cleaned_json_str = re.sub(r'\s+', ' ', full_json_str)
-                try:
-                    return json.loads(cleaned_json_str)
-                except json.JSONDecodeError:
-                    logger.error(f"Could not parse JSON: {cleaned_json_str}")
-                    return {}
-        
-        return {}       
-    except Exception as e:
-        logger.error(f"Regex extraction error: {e}")
-        return {}
+            return extract_fields_with_regex(response_string)
+
 
 def extract_fields_with_regex(text):
     """Extract fields using regex as a last resort"""
     result = {
         "ai": "",
-        "context_utilized": False,
         "document_references": [],
         "title": ""
     }
@@ -106,12 +70,6 @@ def extract_fields_with_regex(text):
     if ai_match:
         result["ai"] = ai_match.group(1).replace('\\n', '\n').replace('\\"', '"')
     
-    # Extract context utilization flag (handle both string and boolean formats)
-    context_match = re.search(r'"context_utilized"\s*:\s*(true|false|"true"|"false")', text, re.IGNORECASE)
-    if context_match:
-        value = context_match.group(1).lower().strip('"')
-        result["context_utilized"] = value == 'true'
-
     # Extract document references
     refs_match = re.search(r'"document_references"\s*:\s*\[([^\]]*)\]', text, re.DOTALL)
     if refs_match:

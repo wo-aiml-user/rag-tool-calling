@@ -91,8 +91,7 @@ async def upload_document(
             "local_fs_path": local_fs_path,
             "chunks_stored": len(documents),
             "collection": collection_name,
-            "embedding_tokens": result["embedding_tokens"],
-            "rerank_tokens": result["rerank_tokens"]
+            "embedding_tokens": result.get("token_usage", {}).get("embedding_tokens", 0)
         },
         201,
     )

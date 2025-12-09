@@ -4,7 +4,7 @@ Includes: retrieval, web search, and weather tools.
 """
 
 # Retrieval tool schema
-RETRIEVAL_TOOL_SCHEMA = {
+retrieval_tool = {
     "type": "function",
     "function": {
         "name": "retrieve_documents",
@@ -28,7 +28,7 @@ RETRIEVAL_TOOL_SCHEMA = {
 }
 
 # Web search tool schema
-SEARCH_ARTICLES_SCHEMA = {
+search_articles = {
     "type": "function",
     "function": {
         "name": "search_articles",
@@ -54,7 +54,7 @@ SEARCH_ARTICLES_SCHEMA = {
 }
 
 # Weather tool schema
-WEATHER_TOOL_SCHEMA = {
+weather_tool = {
     "type": "function",
     "function": {
         "name": "get_current_weather",

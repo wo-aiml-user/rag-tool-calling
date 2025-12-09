@@ -2,9 +2,28 @@ from fastapi import HTTPException, status
 from loguru import logger
 from app.config import settings
 from app.RAG.voyage_embeddings import VoyageEmbeddings
-from app.RAG.document import Document
 from typing import List, Dict, Any
 from pymilvus import Collection, CollectionSchema, FieldSchema, DataType, connections, utility
+from pydantic import BaseModel, Field
+
+
+class Document(BaseModel):
+    """
+    Represents a document chunk with content and metadata.
+    Replacement for langchain.schema.Document.
+    """
+    page_content: str = Field(..., description="The text content of the document chunk")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata associated with the document")
+    
+    class Config:
+        arbitrary_types_allowed = True
+    
+    def __repr__(self) -> str:
+        return f"Document(page_content='{self.page_content}', metadata={self.metadata})"
+    
+    def __str__(self) -> str:
+        return self.page_content
+
 
 
 def store_documents_in_milvus(
