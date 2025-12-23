@@ -3,6 +3,7 @@ from fastapi.exceptions import HTTPException, RequestValidationError
 from app.api.auth.auth_controller import router as auth_router
 from app.api.document.document_controller import router as document_router
 from app.api.chat.chat_controller import router as chat_router
+from app.api.voice.voice_controller import router as voice_router
 from app.utils.response import error_response
 from loguru import logger
 from fastapi import status
@@ -54,3 +55,4 @@ def setup_routes(app: FastAPI):
     app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
     app.include_router(document_router, prefix="/api/document", tags=["Document"])
     app.include_router(chat_router, prefix="/api/chat", tags=["Chat"])
+    app.include_router(voice_router, prefix="/api", tags=["Voice"])

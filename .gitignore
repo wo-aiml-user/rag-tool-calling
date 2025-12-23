@@ -13,3 +13,4 @@ uploads/
 .idea
 .qoder
 rag_worker.lock
+node_modules

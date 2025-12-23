@@ -16,3 +16,4 @@ voyageai>=0.2.0
 httpx>=0.24.0
 tenacity>=8.2.0
 perplexityai
+websockets>=12.0

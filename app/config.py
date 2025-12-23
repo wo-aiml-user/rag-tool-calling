@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     #openweather configuration
     OPENWEATHER_API_KEY: str = ""
 
+    # Deepgram configuration (for voice agent)
+    DEEPGRAM_API_KEY: str = ""
+
     # Environment-specific settings (for dynamic behavior)
     ENVIRONMENT: str = "development"  # Default to development
 

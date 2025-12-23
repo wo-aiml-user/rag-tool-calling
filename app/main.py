@@ -10,7 +10,6 @@ from app.RAG.vector_store import (
     connect_to_milvus, load_all_milvus_collections,
     unload_all_milvus_collections, disconnect_from_milvus,
 )
-# from app.workers.sqs_document_worker import consume_forever   # ⬅️  your SQS loop
 import asyncio, os, socket
 from filelock import FileLock, Timeout
 
