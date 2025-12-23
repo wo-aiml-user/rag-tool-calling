@@ -67,7 +67,7 @@ async def execute_rag_chain(request: ChatRequest, collection_name: str, settings
         "embedding_tokens": 0
     }
     
-    # Single LLM call with tools - let DeepSeek decide
+    # LLM call with tools - let DeepSeek decide
     logger.info("[RAG_CHAIN] Making DeepSeek call with tools")
     response = deepseek.chat_completion(
         messages=messages,
@@ -154,7 +154,7 @@ async def execute_rag_chain(request: ChatRequest, collection_name: str, settings
         final_response = deepseek.chat_completion(
             messages=messages,
             temperature=0.6,
-            tool_choice="none" # Force no tools for final answer
+            tool_choice="none"
         )
         
         final_usage = deepseek.get_usage(final_response)
