@@ -110,9 +110,13 @@ tool_calling/
 │   │   ├── chat/              # Chat API endpoints and service logic
 │   │   │   ├── services/      # Core chat logic (chat_service.py)
 │   │   │   └── models/        # Pydantic models for chat
-│   │   └── document/          # Document upload and processing API
-│   │       ├── services/      # PDF processing logic (pdf_operation.py)
-│   │       └── models/        # Document models
+│   │   ├── document/          # Document upload and processing API
+│   │   │   ├── services/      # PDF processing logic (pdf_operation.py)
+│   │   │   └── models/        # Document models
+│   │   └── voice/             # Voice API endpoints (Deepgram integration)
+│   │       ├── services/      # Voice session & streaming (voice_session.py, voice_service.py)
+│   │       ├── models/        # Pydantic models for voice (voice_model.py)
+│   │       └── voice_controller.py  # Voice WebSocket endpoints
 │   ├── middleware/            # Application Middleware
 │   │   ├── jwt_auth.py        # JWT Authentication Middleware
 │   │   └── logging.py         # Request/Response Logging

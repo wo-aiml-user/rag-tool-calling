@@ -13,6 +13,7 @@ from loguru import logger
 from app.config import Settings
 from app.api.voice.services.voice_service import get_voice_agent_settings
 from tools.functions import get_current_weather, search_articles, retrieve_documents
+import traceback
 
 
 # Deepgram Voice Agent V1 endpoint
@@ -203,7 +204,6 @@ class VoiceAgentSession:
         except Exception as e:
             elapsed_ms = int((time.perf_counter() - start_time) * 1000)
             logger.error(f"[VOICE_FUNCTION] [{self.session_id}] Error in {function_name} after {elapsed_ms}ms: {e}")
-            import traceback
             traceback.print_exc()
             return json.dumps({"error": str(e)})
     
