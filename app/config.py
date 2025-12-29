@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Deepgram configuration (for voice agent)
     DEEPGRAM_API_KEY: str = ""
 
+    # xAI Grok configuration (for voice agent)
+    XAI_API_KEY: str = ""
+
     # Environment-specific settings (for dynamic behavior)
     ENVIRONMENT: str = "development"  # Default to development
 
