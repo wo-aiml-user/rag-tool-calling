@@ -294,7 +294,7 @@ class VoiceAgentSession:
                 # Execute the function
                 result = await self._execute_function(func_name, func_args)
                 
-                logger.info(f"[{self.session_id}] Agent | Function result: {result[:200]}...")
+                logger.info(f"[{self.session_id}] Agent | Function result: {result}")
                 
                 # Send FunctionCallResponse back to Deepgram
                 response = {
