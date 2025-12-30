@@ -111,6 +111,9 @@ async def get_voice_agent_settings(settings: Settings) -> Dict:
             },
             "turn_detection": {
                 "type": "server_vad",
+                "interrupt_response": True,  # Allow user speech to interrupt agent response
+                "silence_duration_ms": 300,  # Pause duration to detect end of speech
+                "threshold": 0.5,  # Voice activity detection sensitivity
             },
             "tools": function_definitions,
             "tool_choice": "auto",

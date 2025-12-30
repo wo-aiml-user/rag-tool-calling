@@ -35,6 +35,7 @@ class VoiceAgentSession:
         self.start_time: Optional[float] = None
         self.audio_chunk_count = 0
         self.playback_started_sent = False
+        self.is_responding = False  # Track if we're actively in a response cycle
         self.pending_function_calls = {}  # Track pending function calls by call_id
     
     async def connect_to_agent(self) -> bool:
@@ -272,15 +273,20 @@ class VoiceAgentSession:
             logger.info(f"[{self.session_id}] Agent | 💬 Conversation item created (role={role}, type={item_type})")
             
             # When user's message is created, trigger response generation
-            if role == "user" or item_type == "message":
+            if role == "user":
                 logger.info(f"[{self.session_id}] Agent | 🚀 Triggering response.create for user message")
                 await self.agent_ws.send(json.dumps({"type": "response.create"}))
             
         elif msg_type == "response.created":
-            logger.info(f"[{self.session_id}] Agent | 🤔 Response generation started")
-            await self.client_ws.send_text(json.dumps({
-                "type": "thinking"
-            }))
+            # Only send thinking if not already in a response cycle
+            if not self.is_responding:
+                self.is_responding = True
+                logger.info(f"[{self.session_id}] Agent | 🤔 Response generation started")
+                await self.client_ws.send_text(json.dumps({
+                    "type": "thinking"
+                }))
+            else:
+                logger.debug(f"[{self.session_id}] Agent | Skipping duplicate thinking notification")
             
         elif msg_type == "response.text.delta":
             # Streaming text response
@@ -321,7 +327,7 @@ class VoiceAgentSession:
                         logger.info(f"[{self.session_id}] Agent | ⚡ First audio chunk (latency: {latency_ms}ms)")
                     await self.client_ws.send_text(json.dumps({
                         "type": "playback_started"
-                    }))
+                    })) 
                 
                 if self.audio_chunk_count == 1:
                     logger.info(f"[{self.session_id}] Agent | 🔊 Receiving audio chunks...")
@@ -337,6 +343,7 @@ class VoiceAgentSession:
             logger.info(f"[{self.session_id}] Agent | 🔊 Audio complete (total chunks: {self.audio_chunk_count})")
             self.audio_chunk_count = 0
             self.playback_started_sent = False
+            self.is_responding = False  # Reset response state when audio completes
             await self.client_ws.send_text(json.dumps({
                 "type": "playback_finished"
             }))
@@ -356,6 +363,28 @@ class VoiceAgentSession:
             logger.info(f"[{self.session_id}] Agent | 🔧 Function call request: {func_name}")
             logger.info(f"[{self.session_id}] Agent |    call_id={call_id}")
             logger.info(f"[{self.session_id}] Agent |    arguments={func_args_str}")
+            
+            # IMPORTANT: Cancel any ongoing response to stop TTS audio
+            # This prevents continuous yelling while the function executes
+            await self.agent_ws.send(json.dumps({"type": "response.cancel"}))
+            logger.info(f"[{self.session_id}] Agent | ⏹ Cancelled ongoing response for function call")
+            
+            # Reset playback state and notify client
+            self.is_responding = False  # Reset since we cancelled the response
+            if self.playback_started_sent:
+                self.playback_started_sent = False
+                self.audio_chunk_count = 0
+                await self.client_ws.send_text(json.dumps({
+                    "type": "playback_finished"
+                }))
+                logger.debug(f"[{self.session_id}] Agent | Reset playback state for function call")
+            
+            # Notify client that function is being executed
+            await self.client_ws.send_text(json.dumps({
+                "type": "function_calling",
+                "name": func_name,
+                "call_id": call_id
+            }))
             
             # Parse arguments
             try:
@@ -421,11 +450,11 @@ class VoiceAgentSession:
         
         elif msg_type == "conversation.created":
             conversation_id = data.get("conversation", {}).get("id", "")
-            logger.info(f"[{self.session_id}] Agent | ✓ Conversation created (id={conversation_id[:8]}...)")
+            logger.info(f"[{self.session_id}] Agent | ✓ Conversation created (id={conversation_id})")
             
         else:
             logger.debug(f"[{self.session_id}] Agent | Unhandled event: {msg_type}")
-            logger.debug(f"[{self.session_id}] Agent |   Data: {json.dumps(data)[:200]}")
+            logger.debug(f"[{self.session_id}] Agent |   Data: {json.dumps(data)}")
     
     async def close(self):
         """Close the Voice Agent connection."""
