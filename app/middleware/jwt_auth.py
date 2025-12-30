@@ -10,6 +10,8 @@ PUBLIC_PATHS = [
     "/redoc",  # ReDoc UI
     "/openapi.json",  # OpenAPI schema
     "/api/auth/token",  # Token generation endpoint
+    "/api/ws/voice",  # Voice WebSocket endpoint (WebSockets don't work with BaseHTTPMiddleware)
+    "/health",  # Health check endpoint
 ]
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
