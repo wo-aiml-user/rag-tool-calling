@@ -188,6 +188,7 @@ function App() {
         case 'error':
           console.error('Server error:', data.message);
           setIsProcessing(false);
+          setIsAnalyzing(false);
           setConnectionStatus('error');
           break;
 
@@ -529,51 +530,116 @@ function App() {
 
         {transcriptAnalysis && !isAnalyzing && (
           <div className="bg-gradient-to-r from-purple-500/20 to-blue-500/20 backdrop-blur-sm rounded-2xl p-6 border border-purple-500/30">
-            <h3 className="text-xl font-semibold text-white mb-4 flex items-center">
-              <span className="mr-2">📊</span> Conversation Analysis
-            </h3>
+            <div className="flex justify-between items-start mb-4">
+              <h3 className="text-xl font-semibold text-white flex items-center">
+                <span className="mr-2">📊</span> Conversation Analysis
+              </h3>
+              <button
+                onClick={() => setTranscriptAnalysis(null)}
+                className="text-white/60 hover:text-white transition-colors text-xl"
+              >
+                ✕
+              </button>
+            </div>
+
             {transcriptAnalysis.error ? (
               <p className="text-red-400">{transcriptAnalysis.error}</p>
             ) : (
-              <div className="space-y-3 text-white/90">
-                <div className="flex items-center space-x-2">
-                  <span className="text-purple-400">Session:</span>
-                  <span className="font-mono text-sm">{transcriptAnalysis.session_id}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-purple-400">Messages:</span>
-                  <span>{transcriptAnalysis.message_count}</span>
-                </div>
-                {transcriptAnalysis.raw_analysis && (
-                  <div className="mt-4">
-                    <span className="text-purple-400 block mb-2">Analysis:</span>
-                    <pre className="bg-black/30 rounded-lg p-4 text-sm overflow-x-auto whitespace-pre-wrap">
-                      {transcriptAnalysis.raw_analysis}
-                    </pre>
+              <div className="space-y-4 text-white/90">
+                {/* Summary Section */}
+                {transcriptAnalysis.summary && (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h4 className="text-purple-300 font-medium mb-2">📝 Summary</h4>
+                    <p className="text-white/80 leading-relaxed">{transcriptAnalysis.summary}</p>
                   </div>
                 )}
-                {!transcriptAnalysis.raw_analysis && Object.keys(transcriptAnalysis).filter(k => !['session_id', 'message_count', 'token_usage'].includes(k)).length > 0 && (
-                  <div className="mt-4">
-                    <span className="text-purple-400 block mb-2">Insights:</span>
-                    <pre className="bg-black/30 rounded-lg p-4 text-sm overflow-x-auto whitespace-pre-wrap">
-                      {JSON.stringify(
-                        Object.fromEntries(
-                          Object.entries(transcriptAnalysis).filter(([k]) => !['session_id', 'message_count', 'token_usage'].includes(k))
-                        ),
-                        null,
-                        2
-                      )}
-                    </pre>
+
+                {/* Industry & Position */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {transcriptAnalysis.industry && (
+                    <div className="bg-white/5 rounded-lg p-3">
+                      <span className="text-purple-400 text-xs block">Industry</span>
+                      <span className="font-medium">{transcriptAnalysis.industry}</span>
+                    </div>
+                  )}
+                  {transcriptAnalysis.position && (
+                    <div className="bg-white/5 rounded-lg p-3">
+                      <span className="text-purple-400 text-xs block">Position</span>
+                      <span className="font-medium">{transcriptAnalysis.position}</span>
+                    </div>
+                  )}
+                  {transcriptAnalysis.tenure && (
+                    <div className="bg-white/5 rounded-lg p-3">
+                      <span className="text-purple-400 text-xs block">Tenure</span>
+                      <span className="font-medium">{transcriptAnalysis.tenure}</span>
+                    </div>
+                  )}
+                  {transcriptAnalysis.sentiment && (
+                    <div className="bg-white/5 rounded-lg p-3">
+                      <span className="text-purple-400 text-xs block">Sentiment</span>
+                      <span className={`font-medium capitalize ${transcriptAnalysis.sentiment === 'positive' ? 'text-green-400' :
+                          transcriptAnalysis.sentiment === 'negative' ? 'text-red-400' :
+                            'text-yellow-400'
+                        }`}>{transcriptAnalysis.sentiment}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Key Insights */}
+                {transcriptAnalysis.key_insights && transcriptAnalysis.key_insights.length > 0 && (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h4 className="text-green-300 font-medium mb-2">💡 Key Insights</h4>
+                    <ul className="space-y-2">
+                      {transcriptAnalysis.key_insights.map((insight, i) => (
+                        <li key={i} className="flex items-start text-white/80">
+                          <span className="text-green-400 mr-2">•</span>
+                          <span>{insight}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
+
+                {/* Opportunities */}
+                {transcriptAnalysis.opportunities && transcriptAnalysis.opportunities.length > 0 && (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h4 className="text-blue-300 font-medium mb-2">🚀 Opportunities</h4>
+                    <ul className="space-y-2">
+                      {transcriptAnalysis.opportunities.map((opp, i) => (
+                        <li key={i} className="flex items-start text-white/80">
+                          <span className="text-blue-400 mr-2">•</span>
+                          <span>{opp}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Red Flags */}
+                {transcriptAnalysis.red_flags && transcriptAnalysis.red_flags.length > 0 && (
+                  <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/20">
+                    <h4 className="text-red-300 font-medium mb-2">⚠️ Red Flags</h4>
+                    <ul className="space-y-2">
+                      {transcriptAnalysis.red_flags.map((flag, i) => (
+                        <li key={i} className="flex items-start text-white/80">
+                          <span className="text-red-400 mr-2">•</span>
+                          <span>{flag}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Session Info */}
+                <div className="flex items-center justify-between text-xs text-white/40 pt-2 border-t border-white/10">
+                  <span>Session: {transcriptAnalysis.session_id?.slice(0, 8)}...</span>
+                  <span>{transcriptAnalysis.message_count} messages</span>
+                  {transcriptAnalysis.token_usage && (
+                    <span>{transcriptAnalysis.token_usage.total_tokens} tokens</span>
+                  )}
+                </div>
               </div>
             )}
-            <button
-              onClick={() => setTranscriptAnalysis(null)}
-              className="mt-4 text-sm text-purple-300 hover:text-white transition-colors"
-            >
-              ✕ Dismiss
-            </button>
           </div>
         )}
       </div>
