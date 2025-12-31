@@ -21,6 +21,8 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('initializing');
+  const [transcriptAnalysis, setTranscriptAnalysis] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const websocketRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -187,6 +189,12 @@ function App() {
           console.error('Server error:', data.message);
           setIsProcessing(false);
           setConnectionStatus('error');
+          break;
+
+        case 'transcript_analysis':
+          console.log('Transcript analysis received:', data.analysis);
+          setTranscriptAnalysis(data.analysis);
+          setIsAnalyzing(false);
           break;
 
         default:
@@ -381,7 +389,14 @@ function App() {
       audioStreamRef.current = null;
     }
 
-    console.log('Recording stopped, waiting for agent response...');
+    // Send end_session to trigger transcript analysis
+    if (websocketRef.current?.readyState === WebSocket.OPEN) {
+      setIsAnalyzing(true);
+      websocketRef.current.send(JSON.stringify({ type: 'end_session' }));
+      console.log('Recording stopped, requesting transcript analysis...');
+    } else {
+      console.log('Recording stopped, WebSocket not open');
+    }
   };
 
   const handleReconnect = () => {
@@ -497,6 +512,67 @@ function App() {
               className="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
             >
               Reconnect
+            </button>
+          </div>
+        )}
+
+        {isAnalyzing && (
+          <div className="flex justify-center">
+            <div className="bg-white/10 backdrop-blur-sm rounded-full px-6 py-3 text-white">
+              <div className="flex items-center space-x-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-purple-400"></div>
+                <span>📊 Analyzing conversation...</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {transcriptAnalysis && !isAnalyzing && (
+          <div className="bg-gradient-to-r from-purple-500/20 to-blue-500/20 backdrop-blur-sm rounded-2xl p-6 border border-purple-500/30">
+            <h3 className="text-xl font-semibold text-white mb-4 flex items-center">
+              <span className="mr-2">📊</span> Conversation Analysis
+            </h3>
+            {transcriptAnalysis.error ? (
+              <p className="text-red-400">{transcriptAnalysis.error}</p>
+            ) : (
+              <div className="space-y-3 text-white/90">
+                <div className="flex items-center space-x-2">
+                  <span className="text-purple-400">Session:</span>
+                  <span className="font-mono text-sm">{transcriptAnalysis.session_id}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-purple-400">Messages:</span>
+                  <span>{transcriptAnalysis.message_count}</span>
+                </div>
+                {transcriptAnalysis.raw_analysis && (
+                  <div className="mt-4">
+                    <span className="text-purple-400 block mb-2">Analysis:</span>
+                    <pre className="bg-black/30 rounded-lg p-4 text-sm overflow-x-auto whitespace-pre-wrap">
+                      {transcriptAnalysis.raw_analysis}
+                    </pre>
+                  </div>
+                )}
+                {!transcriptAnalysis.raw_analysis && Object.keys(transcriptAnalysis).filter(k => !['session_id', 'message_count', 'token_usage'].includes(k)).length > 0 && (
+                  <div className="mt-4">
+                    <span className="text-purple-400 block mb-2">Insights:</span>
+                    <pre className="bg-black/30 rounded-lg p-4 text-sm overflow-x-auto whitespace-pre-wrap">
+                      {JSON.stringify(
+                        Object.fromEntries(
+                          Object.entries(transcriptAnalysis).filter(([k]) => !['session_id', 'message_count', 'token_usage'].includes(k))
+                        ),
+                        null,
+                        2
+                      )}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+            <button
+              onClick={() => setTranscriptAnalysis(null)}
+              className="mt-4 text-sm text-purple-300 hover:text-white transition-colors"
+            >
+              ✕ Dismiss
             </button>
           </div>
         )}

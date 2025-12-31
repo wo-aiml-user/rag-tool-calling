@@ -118,7 +118,7 @@ async def get_voice_agent_settings(settings: Settings) -> Dict:
                     "model": "aura-2-thalia-en"
                 }
             },
-            "greeting": "Hello! How can I help you today?"
+            "greeting": "Hello! I am Maya, a Business Consultant. How can I help you today?"
         }
     }
 

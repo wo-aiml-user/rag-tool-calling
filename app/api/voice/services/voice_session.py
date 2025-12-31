@@ -12,8 +12,11 @@ from fastapi import WebSocket
 from loguru import logger
 from app.config import Settings
 from app.api.voice.services.voice_service import get_voice_agent_settings
+from app.RAG.prompt import get_transcript_analysis_prompt
 from tools.functions import get_current_weather, search_articles, retrieve_documents
+from app.RAG.deepseek_client import DeepSeekClient
 import traceback
+from typing import List, Dict
 
 
 # Deepgram Voice Agent V1 endpoint
@@ -35,6 +38,7 @@ class VoiceAgentSession:
         self.start_time: Optional[float] = None
         self.audio_chunk_count = 0
         self.playback_started_sent = False
+        self.conversation_history: List[Dict[str, str]] = []  # Store conversation for analysis
     
     async def connect_to_agent(self) -> bool:
         """Connect to Deepgram Voice Agent API."""
@@ -44,10 +48,17 @@ class VoiceAgentSession:
                 logger.error(f"[{self.session_id}] DEEPGRAM_API_KEY not configured")
                 return False
             
-            # Connect without ping timeout settings
-            self.agent_ws = await websockets.connect(
-                VOICE_AGENT_URL,
-                additional_headers={"Authorization": f"Token {deepgram_api_key}"}
+            logger.info(f"[{self.session_id}] Connecting to Deepgram Voice Agent at {VOICE_AGENT_URL}...")
+            
+            # Connect with longer timeout for slow networks
+            self.agent_ws = await asyncio.wait_for(
+                websockets.connect(
+                    VOICE_AGENT_URL,
+                    additional_headers={"Authorization": f"Token {deepgram_api_key}"},
+                    ping_interval=20,
+                    ping_timeout=20,
+                ),
+                timeout=30.0  # 30 second timeout for connection
             )
             logger.info(f"[{self.session_id}] Connected to Deepgram Voice Agent")
             
@@ -57,8 +68,12 @@ class VoiceAgentSession:
             logger.info(f"[{self.session_id}] Sent Settings to Voice Agent")
             
             return True
+        except asyncio.TimeoutError:
+            logger.error(f"[{self.session_id}] Connection to Deepgram timed out after 30s. Check network/firewall.")
+            return False
         except Exception as e:
             logger.error(f"[{self.session_id}] Failed to connect to Voice Agent: {e}")
+            traceback.print_exc()
             return False
 
     
@@ -261,12 +276,16 @@ class VoiceAgentSession:
             
             if role == "user":
                 logger.info(f"[{self.session_id}] Agent | User: {content}")
+                # Store user message in conversation history
+                self.conversation_history.append({"role": "user", "content": content})
                 await self.client_ws.send_text(json.dumps({
                     "type": "transcript",
                     "text": content
                 }))
             elif role == "assistant":
                 logger.info(f"[{self.session_id}] Agent | Assistant: {content}")
+                # Store assistant message in conversation history
+                self.conversation_history.append({"role": "assistant", "content": content})
                 await self.client_ws.send_text(json.dumps({
                     "type": "response",
                     "text": content
@@ -345,9 +364,82 @@ class VoiceAgentSession:
         else:
             logger.debug(f"[{self.session_id}] Agent | {msg_type}: {data}")
     
+    async def post_transcript(self) -> Dict:
+        """
+        Analyze the conversation transcript using DeepSeek LLM.
+        Extracts stakeholder insights based on the Maya Business Consultant discovery conversation.
+        
+        Returns:
+            Analysis report with extracted verticals and sentiment
+        """
+        if not self.conversation_history:
+            logger.info(f"[{self.session_id}] No conversation to analyze")
+            return {"error": "No conversation history"}
+        
+        logger.info(f"[{self.session_id}] Analyzing conversation ({len(self.conversation_history)} messages)...")
+        
+        # Format conversation for analysis
+        conversation_text = "\n".join([
+            f"{msg['role'].upper()}: {msg['content']}" 
+            for msg in self.conversation_history
+        ])
+        
+        # Get analysis prompt from centralized prompt module
+        analysis_prompt = get_transcript_analysis_prompt(conversation_text)
+
+        try:
+            client = DeepSeekClient(api_key=self.settings.DEEPSEEK_API_KEY)
+            response = client.chat_completion(
+                messages=[
+                    {"role": "system", "content": "You are an expert business analyst. Analyze conversations and extract structured insights. Always respond with valid JSON."},
+                    {"role": "user", "content": analysis_prompt}
+                ],
+                temperature=0.4,
+            )
+            
+            analysis_text = response.choices[0].message.content
+            logger.info(f"[{self.session_id}] Post-transcript analysis complete")
+            
+            # Try to parse as JSON
+            try:
+                import re
+                # Extract JSON from response (handle markdown code blocks)
+                json_match = re.search(r'```json\s*([\s\S]*?)\s*```', analysis_text)
+                if json_match:
+                    analysis_text = json_match.group(1)
+                analysis_result = json.loads(analysis_text)
+            except json.JSONDecodeError:
+                analysis_result = {"raw_analysis": analysis_text}
+            
+            # Add metadata
+            analysis_result["session_id"] = self.session_id
+            analysis_result["message_count"] = len(self.conversation_history)
+            analysis_result["token_usage"] = client.get_usage(response)
+            
+            logger.info(f"[{self.session_id}] Analysis result: {json.dumps(analysis_result, indent=2)}")
+            return analysis_result
+            
+        except Exception as e:
+            logger.error(f"[{self.session_id}] Error in post_transcript analysis: {e}")
+            traceback.print_exc()
+            return {"error": str(e), "conversation_history": self.conversation_history}
+    
     async def close(self):
-        """Close the Voice Agent connection."""
+        """Close the Voice Agent connection and analyze transcript."""
         self.is_active = False
+        
+        # Analyze conversation before closing
+        if self.conversation_history:
+            try:
+                analysis = await self.post_transcript()
+                # Send analysis to client
+                await self.client_ws.send_text(json.dumps({
+                    "type": "transcript_analysis",
+                    "analysis": analysis
+                }))
+            except Exception as e:
+                logger.error(f"[{self.session_id}] Error sending analysis: {e}")
+        
         if self.agent_ws:
             try:
                 await self.agent_ws.close()
