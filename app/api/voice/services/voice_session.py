@@ -1,372 +1,288 @@
 """
-Voice Agent Session management.
-Handles WebSocket connection to Deepgram Voice Agent API.
+Voice Agent Session management using Gemini Live API.
+Handles real-time voice-to-voice conversations with Google's Gemini native audio model.
 """
+import os
 import json
 import base64
 import asyncio
 import time
-from typing import Optional
-import websockets
+from typing import Optional, List, Dict
 from fastapi import WebSocket
 from loguru import logger
+from google import genai
+from google.genai import types
 from app.config import Settings
-from app.api.voice.services.voice_service import get_voice_agent_settings
+from app.api.voice.services.voice_service import (
+    get_gemini_live_config,
+    get_audio_config,
+    GEMINI_VOICE_MODEL,
+    SEND_SAMPLE_RATE,
+    RECEIVE_SAMPLE_RATE
+)
 from app.RAG.prompt import get_transcript_analysis_prompt
-from tools.functions import get_current_weather, search_articles, retrieve_documents
-from app.RAG.deepseek_client import DeepSeekClient
 import traceback
-from typing import List, Dict
 
 
-# Deepgram Voice Agent V1 endpoint
-VOICE_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse"
-
-# Default collection for voice document retrieval
-DEFAULT_COLLECTION = "tool_calling_dev"
-
-
-class VoiceAgentSession:
-    """Manages a session with Deepgram Voice Agent API."""
+class GeminiVoiceSession:
+    """Manages a real-time voice session using Gemini Live API."""
     
-    def __init__(self, session_id: str, client_ws: WebSocket, settings: Settings):
+    def __init__(self, session_id: str, client_ws: WebSocket, settings: Settings, max_turns: int = 20):
         self.session_id = session_id
         self.client_ws = client_ws
         self.settings = settings
-        self.agent_ws: Optional[websockets.WebSocketClientProtocol] = None
         self.is_active = True
         self.start_time: Optional[float] = None
+        
+        # Gemini session
+        self.gemini_session = None
+        self.gemini_client = None
+        
+        # Audio queue for playback
+        self.audio_out_queue: asyncio.Queue = asyncio.Queue()
+        
+        # State tracking
+        self.last_speaker: Optional[str] = None
+        self.ai_speaking = False
         self.audio_chunk_count = 0
-        self.playback_started_sent = False
-        self.conversation_history: List[Dict[str, str]] = []  # Store conversation for analysis
+        
+        # Token tracking
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.total_thinking_tokens = 0
+        self.turn_count = 0
+        self.max_turns = max_turns
+        
+        # Conversation history for analysis
+        self.conversation_history: List[Dict[str, str]] = []
+        
+        # Tasks
+        self.receive_task: Optional[asyncio.Task] = None
+        self.send_audio_task: Optional[asyncio.Task] = None
     
     async def connect_to_agent(self) -> bool:
-        """Connect to Deepgram Voice Agent API."""
+        """Connect to Gemini Live API."""
         try:
-            deepgram_api_key = self.settings.DEEPGRAM_API_KEY
-            if not deepgram_api_key:
-                logger.error(f"[{self.session_id}] DEEPGRAM_API_KEY not configured")
+            gemini_api_key = self.settings.GEMINI_API_KEY
+            if not gemini_api_key:
+                logger.error(f"[{self.session_id}] GEMINI_API_KEY not configured")
                 return False
             
-            logger.info(f"[{self.session_id}] Connecting to Deepgram Voice Agent at {VOICE_AGENT_URL}...")
+            logger.info(f"[{self.session_id}] Connecting to Gemini Live API...")
             
-            # Connect with longer timeout for slow networks
-            self.agent_ws = await asyncio.wait_for(
-                websockets.connect(
-                    VOICE_AGENT_URL,
-                    additional_headers={"Authorization": f"Token {deepgram_api_key}"},
-                    ping_interval=20,
-                    ping_timeout=20,
-                ),
-                timeout=30.0  # 30 second timeout for connection
+            # Initialize Gemini client
+            self.gemini_client = genai.Client(
+                http_options={"api_version": "v1beta"},
+                api_key=gemini_api_key,
             )
-            logger.info(f"[{self.session_id}] Connected to Deepgram Voice Agent")
             
-            # Send Settings message to configure the agent
-            settings_dict = await get_voice_agent_settings(self.settings)
-            await self.agent_ws.send(json.dumps(settings_dict))
-            logger.info(f"[{self.session_id}] Sent Settings to Voice Agent")
+            # Get the live config
+            config = get_gemini_live_config()
             
+            # Connect to Gemini Live
+            self.gemini_session = await self.gemini_client.aio.live.connect(
+                model=GEMINI_VOICE_MODEL,
+                config=config
+            )
+            
+            logger.info(f"[{self.session_id}] Connected to Gemini Live API")
             return True
-        except asyncio.TimeoutError:
-            logger.error(f"[{self.session_id}] Connection to Deepgram timed out after 30s. Check network/firewall.")
-            return False
+            
         except Exception as e:
-            logger.error(f"[{self.session_id}] Failed to connect to Voice Agent: {e}")
+            logger.error(f"[{self.session_id}] Failed to connect to Gemini Live: {e}")
             traceback.print_exc()
             return False
-
+    
+    async def start_streaming(self):
+        """Start the audio streaming tasks."""
+        if not self.gemini_session:
+            logger.error(f"[{self.session_id}] Cannot start streaming - not connected")
+            return
+        
+        # Start receiving from Gemini in background
+        self.receive_task = asyncio.create_task(self._receive_from_gemini())
+        self.send_audio_task = asyncio.create_task(self._send_audio_to_client())
+        
+        logger.info(f"[{self.session_id}] Audio streaming tasks started")
     
     async def forward_audio_to_agent(self, audio_data: bytes):
-        """Forward audio from client to Deepgram Voice Agent."""
-        if self.agent_ws:
+        """Forward audio from client to Gemini Live API."""
+        if self.gemini_session and not self.ai_speaking:
             try:
-                await self.agent_ws.send(audio_data)
+                await self.gemini_session.send(
+                    input={"data": audio_data, "mime_type": "audio/pcm"}
+                )
             except Exception as e:
-                logger.error(f"[{self.session_id}] Error sending audio to agent: {e}")
+                logger.error(f"[{self.session_id}] Error sending audio to Gemini: {e}")
     
-    async def receive_from_agent(self):
-        """Receive messages/audio from Deepgram Voice Agent and forward to client."""
+    async def _receive_from_gemini(self):
+        """Background task to receive responses from Gemini Live API."""
         try:
-            while self.is_active and self.agent_ws:
+            while self.is_active and self.gemini_session:
                 try:
-                    msg = await asyncio.wait_for(self.agent_ws.recv(), timeout=0.1)
+                    turn = self.gemini_session.receive()
                     
-                    if isinstance(msg, bytes):
-                        # Audio data from TTS - forward to client
-                        self.audio_chunk_count += 1
+                    turn_input_tokens = 0
+                    turn_output_tokens = 0
+                    turn_thinking_tokens = 0
+                    user_text = ""
+                    model_text = ""
+                    
+                    async for response in turn:
+                        # Handle audio data
+                        if data := response.data:
+                            self.audio_out_queue.put_nowait(data)
                         
-                        # Send playback_started on first audio chunk
-                        if not self.playback_started_sent:
-                            self.playback_started_sent = True
-                            if self.start_time:
-                                latency_ms = int((time.perf_counter() - self.start_time) * 1000)
-                                logger.info(f"[{self.session_id}] Agent | ⚡ First audio (latency: {latency_ms}ms)")
-                            await self.client_ws.send_text(json.dumps({
-                                "type": "playback_started"
-                            }))
-                        
-                        # Log only first audio chunk
-                        if self.audio_chunk_count == 1:
-                            logger.info(f"[{self.session_id}] Agent | Receiving audio chunks...")
-                        
-                        audio_base64 = base64.b64encode(msg).decode('utf-8')
-                        await self.client_ws.send_text(json.dumps({
-                            "type": "audio_chunk",
-                            "audio": audio_base64,
-                            "encoding": "linear16",
-                            "sample_rate": 24000
-                        }))
-                        
-                    elif isinstance(msg, str):
-                        # JSON message from agent
-                        await self._handle_agent_message(msg)
+                        # Handle input transcription (user speech)
+                        if (server_content := response.server_content) and server_content.input_transcription:
+                            if self.last_speaker != "User":
+                                self.last_speaker = "User"
+                                self.start_time = time.perf_counter()
                             
-                except asyncio.TimeoutError:
-                    continue
-                except websockets.exceptions.ConnectionClosed:
-                    logger.info(f"[{self.session_id}] Agent connection closed")
+                            text_chunk = server_content.input_transcription.text
+                            user_text += text_chunk
+                            
+                            # Send transcript to client
+                            await self._send_to_client({
+                                "type": "transcript",
+                                "text": text_chunk,
+                                "role": "user"
+                            })
+                        
+                        # Handle output transcription (model speech)
+                        if (server_content := response.server_content) and server_content.output_transcription:
+                            if self.last_speaker != "Model":
+                                self.last_speaker = "Model"
+                                if self.start_time:
+                                    latency_ms = int((time.perf_counter() - self.start_time) * 1000)
+                                    logger.info(f"[{self.session_id}] ⚡ First response (latency: {latency_ms}ms)")
+                                
+                                await self._send_to_client({"type": "playback_started"})
+                            
+                            text_chunk = server_content.output_transcription.text
+                            model_text += text_chunk
+                            
+                            # Send response text to client
+                            await self._send_to_client({
+                                "type": "response",
+                                "text": text_chunk,
+                                "role": "assistant"
+                            })
+                        
+                        # Track token usage
+                        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                            usage = response.usage_metadata
+                            if hasattr(usage, 'prompt_token_count') and usage.prompt_token_count:
+                                turn_input_tokens = usage.prompt_token_count
+                            if hasattr(usage, 'response_token_count') and usage.response_token_count:
+                                turn_output_tokens = usage.response_token_count
+                            if hasattr(usage, 'thoughts_token_count') and usage.thoughts_token_count:
+                                turn_thinking_tokens = usage.thoughts_token_count
+                    
+                    # Save to conversation history
+                    if user_text:
+                        self.conversation_history.append({
+                            "role": "user",
+                            "content": user_text.strip(),
+                            "turn": self.turn_count + 1
+                        })
+                        logger.info(f"[{self.session_id}] User: {user_text.strip()[:100]}...")
+                    
+                    if model_text:
+                        self.conversation_history.append({
+                            "role": "assistant",
+                            "content": model_text.strip(),
+                            "turn": self.turn_count + 1
+                        })
+                        logger.info(f"[{self.session_id}] Model: {model_text.strip()[:100]}...")
+                    
+                    # Update token counters
+                    if turn_input_tokens > 0 or turn_output_tokens > 0:
+                        self.total_input_tokens += turn_input_tokens
+                        self.total_output_tokens += turn_output_tokens
+                        self.total_thinking_tokens += turn_thinking_tokens
+                        self.turn_count += 1
+                        
+                        logger.info(f"[{self.session_id}] Turn #{self.turn_count}: "
+                                  f"in={turn_input_tokens}, out={turn_output_tokens}, "
+                                  f"total={self.total_input_tokens + self.total_output_tokens}")
+                        
+                        # Send token usage to client
+                        await self._send_to_client({
+                            "type": "token_usage",
+                            "turn": self.turn_count,
+                            "input_tokens": turn_input_tokens,
+                            "output_tokens": turn_output_tokens,
+                            "total_input": self.total_input_tokens,
+                            "total_output": self.total_output_tokens
+                        })
+                    
+                    # Notify turn complete
+                    await self._send_to_client({"type": "playback_finished"})
+                    
+                    # Clear audio queue on turn complete (handles interruptions)
+                    while not self.audio_out_queue.empty():
+                        try:
+                            self.audio_out_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                    
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"[{self.session_id}] Error in receive loop: {e}")
+                    traceback.print_exc()
                     break
                     
         except Exception as e:
-            logger.error(f"[{self.session_id}] Error receiving from agent: {e}")
-    
-    async def _execute_function(self, function_name: str, arguments: dict) -> str:
-        """
-        Execute a function and return the result as a JSON string.
-        Logs each step like the chat module for debugging.
-        """
-        start_time = time.perf_counter()
-        
-        logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Starting execution: {function_name}")
-        logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Arguments: {json.dumps(arguments)}")
-        
-        try:
-            if function_name == "get_current_weather":
-                location = arguments.get("location", "")
-                unit = arguments.get("unit", "celsius")
-                
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Weather lookup: location={location}, unit={unit}")
-                
-                result = get_current_weather(location=location, unit=unit)
-                
-                elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Weather result: {result.get('description', 'N/A')}, temp={result.get('temperature', 'N/A')}° | took {elapsed_ms}ms")
-                return json.dumps(result)
-            
-            elif function_name == "search_articles":
-                query = arguments.get("query", "")
-                max_results = arguments.get("max_results", 2)
-                
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Web search: query='{query}', max_results={max_results}")
-                
-                result = search_articles(query=query, max_results=max_results)
-                
-                elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-                content_preview = str(result)[:150] if result else "No results"
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Search result: {content_preview}... | took {elapsed_ms}ms")
-                return json.dumps(result)
-            
-            elif function_name == "retrieve_documents":
-                query = arguments.get("query", "")
-                file_ids = arguments.get("file_ids", None)
-                
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Document retrieval: query='{query}', collection={DEFAULT_COLLECTION}")
-                
-                # Use retrieve_documents from tools/functions.py
-                documents, token_usage = retrieve_documents(
-                    query=query,
-                    collection_name=DEFAULT_COLLECTION,
-                    file_ids=file_ids,
-                    top_k=5  # Fewer docs for voice to keep response concise
-                )
-                
-                elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Retrieved {len(documents)} documents | tokens={token_usage} | took {elapsed_ms}ms")
-                
-                if documents:
-                    # Format documents for voice response
-                    doc_summaries = []
-                    for i, doc in enumerate(documents[:3]):  # Top 3 for voice
-                        content_preview = doc.page_content[:200].replace('\n', ' ')
-                        doc_summaries.append({
-                            "index": i + 1,
-                            "file": doc.metadata.get("file_name", "Unknown"),
-                            "content": content_preview,
-                            "score": round(doc.metadata.get("score", 0), 3)
-                        })
-                        logger.debug(f"[VOICE_FUNCTION] [{self.session_id}] Doc {i+1}: {doc.metadata.get('file_name', 'Unknown')} (score={doc.metadata.get('score', 0):.3f})")
-                    
-                    result = {
-                        "found": True,
-                        "count": len(documents),
-                        "documents": doc_summaries,
-                        "message": f"Found {len(documents)} relevant documents"
-                    }
-                else:
-                    result = {
-                        "found": False,
-                        "count": 0,
-                        "message": "No relevant documents found for this query"
-                    }
-                
-                return json.dumps(result)
-            
-            else:
-                logger.warning(f"[VOICE_FUNCTION] [{self.session_id}] Unknown function: {function_name}")
-                return json.dumps({"error": f"Unknown function: {function_name}"})
-                
-        except Exception as e:
-            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-            logger.error(f"[VOICE_FUNCTION] [{self.session_id}] Error in {function_name} after {elapsed_ms}ms: {e}")
+            logger.error(f"[{self.session_id}] Receive task error: {e}")
             traceback.print_exc()
-            return json.dumps({"error": str(e)})
     
-    async def _handle_agent_message(self, msg: str):
-        """Handle JSON message from Deepgram Voice Agent."""
-        data = json.loads(msg)
-        msg_type = data.get("type")
-        
-        if msg_type == "Welcome":
-            logger.info(f"[{self.session_id}] Agent | Welcome received")
-            await self.client_ws.send_text(json.dumps({
-                "type": "agent_ready"
-            }))
-            
-        elif msg_type == "SettingsApplied":
-            logger.info(f"[{self.session_id}] Agent | Settings applied")
-            await self.client_ws.send_text(json.dumps({
-                "type": "settings_applied"
-            }))
-            
-        elif msg_type == "UserStartedSpeaking":
-            self.start_time = time.perf_counter()
-            logger.info(f"[{self.session_id}] Agent | User started speaking")
-            await self.client_ws.send_text(json.dumps({
-                "type": "speech_started"
-            }))
-            
-        elif msg_type == "AgentThinking":
-            logger.info(f"[{self.session_id}] Agent | Thinking...")
-            await self.client_ws.send_text(json.dumps({
-                "type": "thinking"
-            }))
-            
-        elif msg_type == "AgentStartedSpeaking":
-            if self.start_time:
-                latency_ms = int((time.perf_counter() - self.start_time) * 1000)
-                logger.info(f"[{self.session_id}] Agent | ⚡ Started speaking (latency: {latency_ms}ms)")
-            await self.client_ws.send_text(json.dumps({
-                "type": "playback_started"
-            }))
-            
-        elif msg_type == "AgentAudioDone":
-            logger.info(f"[{self.session_id}] Agent | Audio done (total chunks: {self.audio_chunk_count})")
-            # Reset for next response
-            self.audio_chunk_count = 0
-            self.playback_started_sent = False
-            await self.client_ws.send_text(json.dumps({
-                "type": "playback_finished"
-            }))
-            
-        elif msg_type == "ConversationText":
-            # Transcript or response text
-            role = data.get("role")
-            content = data.get("content", "")
-            
-            if role == "user":
-                logger.info(f"[{self.session_id}] Agent | User: {content}")
-                # Store user message in conversation history
-                self.conversation_history.append({"role": "user", "content": content})
-                await self.client_ws.send_text(json.dumps({
-                    "type": "transcript",
-                    "text": content
-                }))
-            elif role == "assistant":
-                logger.info(f"[{self.session_id}] Agent | Assistant: {content}")
-                # Store assistant message in conversation history
-                self.conversation_history.append({"role": "assistant", "content": content})
-                await self.client_ws.send_text(json.dumps({
-                    "type": "response",
-                    "text": content
-                }))
-        
-        elif msg_type == "FunctionCallRequest":
-            # Deepgram is requesting us to execute a function
-            # This happens when client_side: true
-            functions = data.get("functions", [])
-            logger.info(f"[{self.session_id}] Agent | FunctionCallRequest: {data}")
-            
-            for func in functions:
-                func_id = func.get("id", "")
-                func_name = func.get("name", "")
-                func_args_str = func.get("arguments", "{}")
-                
-                # Parse arguments
+    async def _send_audio_to_client(self):
+        """Background task to forward audio from Gemini to client."""
+        try:
+            while self.is_active:
                 try:
-                    func_args = json.loads(func_args_str) if isinstance(func_args_str, str) else func_args_str
-                except json.JSONDecodeError:
-                    func_args = {}
-                
-                logger.info(f"[{self.session_id}] Agent | Executing: {func_name}({func_args})")
-                
-                # Execute the function
-                result = await self._execute_function(func_name, func_args)
-                
-                logger.info(f"[{self.session_id}] Agent | Function result: {result}")
-                
-                # Send FunctionCallResponse back to Deepgram
-                response = {
-                    "type": "FunctionCallResponse",
-                    "id": func_id,
-                    "name": func_name,
-                    "content": result
-                }
-                
-                await self.agent_ws.send(json.dumps(response))
-                logger.info(f"[{self.session_id}] Agent | Sent FunctionCallResponse for {func_name}")
-                
-                # Notify client
-                await self.client_ws.send_text(json.dumps({
-                    "type": "function_executed",
-                    "name": func_name,
-                    "result": result
-                }))
-                
-        elif msg_type == "FunctionCall":
-            # Legacy handler - tool/function call from agent (server-side)
-            function_name = data.get("name", "")
-            function_args = data.get("arguments", {})
-            logger.info(f"[{self.session_id}] Agent | Function call: {function_name}({function_args})")
-            await self.client_ws.send_text(json.dumps({
-                "type": "function_call",
-                "name": function_name,
-                "arguments": function_args
-            }))
-            
-        elif msg_type == "FunctionCallResult":
-            # Result of function call
-            result = data.get("result", "")
-            logger.info(f"[{self.session_id}] Agent | Function result received")
-            await self.client_ws.send_text(json.dumps({
-                "type": "function_result",
-                "result": result
-            }))
-                
-        elif msg_type == "Error":
-            error_msg = data.get("message", "Unknown error")
-            logger.error(f"[{self.session_id}] Agent | Error: {error_msg}")
-            await self.client_ws.send_text(json.dumps({
-                "type": "error",
-                "message": error_msg
-            }))
-            
-        else:
-            logger.debug(f"[{self.session_id}] Agent | {msg_type}: {data}")
+                    audio_data = await asyncio.wait_for(
+                        self.audio_out_queue.get(),
+                        timeout=0.1
+                    )
+                    
+                    self.ai_speaking = True
+                    self.audio_chunk_count += 1
+                    
+                    # Log first chunk
+                    if self.audio_chunk_count == 1:
+                        logger.info(f"[{self.session_id}] Sending audio chunks to client...")
+                    
+                    # Send audio to client as base64
+                    audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+                    await self._send_to_client({
+                        "type": "audio_chunk",
+                        "audio": audio_base64,
+                        "encoding": "linear16",
+                        "sample_rate": RECEIVE_SAMPLE_RATE
+                    })
+                    
+                except asyncio.TimeoutError:
+                    self.ai_speaking = False
+                    continue
+                except asyncio.CancelledError:
+                    break
+                    
+        except Exception as e:
+            logger.error(f"[{self.session_id}] Audio send task error: {e}")
+    
+    async def _send_to_client(self, message: dict):
+        """Send a JSON message to the client WebSocket."""
+        try:
+            await self.client_ws.send_text(json.dumps(message))
+        except Exception as e:
+            logger.error(f"[{self.session_id}] Error sending to client: {e}")
     
     async def post_transcript(self) -> Dict:
         """
-        Analyze the conversation transcript using DeepSeek LLM.
+        Analyze the conversation transcript using Gemini.
         Extracts stakeholder insights based on the Maya Business Consultant discovery conversation.
         
         Returns:
@@ -388,16 +304,20 @@ class VoiceAgentSession:
         analysis_prompt = get_transcript_analysis_prompt(conversation_text)
 
         try:
-            client = DeepSeekClient(api_key=self.settings.DEEPSEEK_API_KEY)
-            response = client.chat_completion(
-                messages=[
-                    {"role": "system", "content": "You are an expert business analyst. Analyze conversations and extract structured insights. Always respond with valid JSON."},
-                    {"role": "user", "content": analysis_prompt}
+            # Use Gemini for analysis
+            client = genai.Client(api_key=self.settings.GEMINI_API_KEY)
+            response = await client.aio.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[
+                    {"role": "user", "parts": [{"text": analysis_prompt}]}
                 ],
-                temperature=0.4,
+                config=types.GenerateContentConfig(
+                    system_instruction="You are an expert business analyst. Analyze conversations and extract structured insights. Always respond with valid JSON.",
+                    temperature=0.4,
+                )
             )
             
-            analysis_text = response.choices[0].message.content
+            analysis_text = response.text
             logger.info(f"[{self.session_id}] Post-transcript analysis complete")
             
             # Try to parse as JSON
@@ -414,7 +334,11 @@ class VoiceAgentSession:
             # Add metadata
             analysis_result["session_id"] = self.session_id
             analysis_result["message_count"] = len(self.conversation_history)
-            analysis_result["token_usage"] = client.get_usage(response)
+            analysis_result["total_tokens"] = {
+                "input": self.total_input_tokens,
+                "output": self.total_output_tokens,
+                "thinking": self.total_thinking_tokens
+            }
             
             logger.info(f"[{self.session_id}] Analysis result: {json.dumps(analysis_result, indent=2)}")
             return analysis_result
@@ -424,26 +348,71 @@ class VoiceAgentSession:
             traceback.print_exc()
             return {"error": str(e), "conversation_history": self.conversation_history}
     
+    def get_session_stats(self) -> Dict:
+        """Get current session statistics."""
+        return {
+            "session_id": self.session_id,
+            "turn_count": self.turn_count,
+            "max_turns": self.max_turns,
+            "message_count": len(self.conversation_history),
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_thinking_tokens": self.total_thinking_tokens,
+            "grand_total_tokens": self.total_input_tokens + self.total_output_tokens + self.total_thinking_tokens,
+            "audio_chunks_sent": self.audio_chunk_count
+        }
+    
     async def close(self):
-        """Close the Voice Agent connection and analyze transcript."""
+        """Close the Gemini Live session and analyze transcript."""
         self.is_active = False
+        
+        # Cancel streaming tasks
+        if self.receive_task:
+            self.receive_task.cancel()
+            try:
+                await self.receive_task
+            except asyncio.CancelledError:
+                pass
+        
+        if self.send_audio_task:
+            self.send_audio_task.cancel()
+            try:
+                await self.send_audio_task
+            except asyncio.CancelledError:
+                pass
         
         # Analyze conversation before closing
         if self.conversation_history:
             try:
                 analysis = await self.post_transcript()
                 # Send analysis to client
-                await self.client_ws.send_text(json.dumps({
+                await self._send_to_client({
                     "type": "transcript_analysis",
                     "analysis": analysis
-                }))
+                })
             except Exception as e:
                 logger.error(f"[{self.session_id}] Error sending analysis: {e}")
         
-        if self.agent_ws:
+        # Send final stats
+        try:
+            await self._send_to_client({
+                "type": "session_stats",
+                "stats": self.get_session_stats()
+            })
+        except Exception:
+            pass
+        
+        # Close Gemini session
+        if self.gemini_session:
             try:
-                await self.agent_ws.close()
+                # Session cleanup - genai client handles this
+                self.gemini_session = None
             except Exception:
                 pass
-        logger.info(f"[{self.session_id}] Session closed")
+        
+        logger.info(f"[{self.session_id}] Session closed - Turns: {self.turn_count}, "
+                   f"Tokens: {self.total_input_tokens + self.total_output_tokens}")
 
+
+# Alias for backward compatibility
+VoiceAgentSession = GeminiVoiceSession

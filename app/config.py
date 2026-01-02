@@ -46,6 +46,9 @@ class Settings(BaseSettings):
 
     # Deepgram configuration (for voice agent)
     DEEPGRAM_API_KEY: str = ""
+    
+    # Gemini configuration (for Gemini Live voice)
+    GEMINI_API_KEY: str = ""
 
     #groq configuration
     XAI_API_KEY: str = ""

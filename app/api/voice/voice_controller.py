@@ -1,6 +1,6 @@
 """
 Voice Agent WebSocket Controller.
-Handles WebSocket connections for real-time voice interactions.
+Handles WebSocket connections for real-time voice interactions using Gemini Live API.
 """
 import json
 import base64
@@ -9,13 +9,14 @@ from typing import Dict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 from app.config import settings
-from app.api.voice.services.voice_session import VoiceAgentSession
+from app.api.voice.services.voice_session import GeminiVoiceSession
+from app.api.voice.services.voice_service import get_audio_config
 
 
 router = APIRouter()
 
 # Store active sessions
-active_sessions: Dict[str, VoiceAgentSession] = {}
+active_sessions: Dict[str, GeminiVoiceSession] = {}
 
 
 @router.websocket("/ws/voice/{session_id}")
@@ -25,32 +26,32 @@ async def websocket_voice_endpoint(
 ):
 
     """
-    Handle WebSocket connection for voice agent.
+    Handle WebSocket connection for Gemini voice agent.
     
     Message Types (Client -> Server):
-    - start_session: Initialize voice agent connection
+    - start_session: Initialize Gemini Live connection
     - audio_chunk: Forward audio data (base64 encoded in audio_data field)
     - end_session: Close the session
+    - get_stats: Get current session statistics
     
     Message Types (Server -> Client):
     - session_started: Session initialized successfully
-    - agent_ready: Voice agent is ready
-    - settings_applied: Settings configured on agent
+    - audio_config: Audio settings for client
     - speech_started: User started speaking
-    - thinking: Agent is processing
     - playback_started: Audio playback beginning
     - playback_finished: Audio playback complete
-    - audio_chunk: Audio data from TTS (base64 encoded)
+    - audio_chunk: Audio data from Gemini TTS (base64 encoded)
     - transcript: User speech transcript
     - response: Agent text response
-    - function_call: Agent called a function/tool
-    - function_result: Result of function call
+    - token_usage: Token usage for the turn
+    - session_stats: Session statistics
+    - transcript_analysis: Post-session analysis
     - error: Error message
     """
     await websocket.accept()
     logger.info(f"[{session_id}] Client connected")
     
-    session = VoiceAgentSession(session_id, websocket, settings)
+    session = GeminiVoiceSession(session_id, websocket, settings)
     active_sessions[session_id] = session
     
     try:
@@ -65,27 +66,41 @@ async def websocket_voice_endpoint(
                 msg_type = data.get("type")
                 
                 if msg_type == "start_session":
-                    logger.info(f"[{session_id}] Starting voice agent session...")
+                    logger.info(f"[{session_id}] Starting Gemini voice session...")
                     success = await session.connect_to_agent()
                     
                     if success:
-                        # Start receiving from agent in background
-                        asyncio.create_task(session.receive_from_agent())
+                        # Start streaming tasks in background
+                        await session.start_streaming()
+                        
+                        # Send session started and audio config
                         await session.client_ws.send_text(json.dumps({
                             "type": "session_started",
                             "session_id": session_id
                         }))
+                        await session.client_ws.send_text(json.dumps({
+                            "type": "audio_config",
+                            "config": get_audio_config()
+                        }))
                     else:
                         await session.client_ws.send_text(json.dumps({
                             "type": "error",
-                            "message": "Failed to connect to voice agent"
+                            "message": "Failed to connect to Gemini Live API"
                         }))
                 
                 elif msg_type == "audio_chunk":
-                    # Decode and forward audio to Deepgram Voice Agent
+                    # Decode and forward audio to Gemini
                     if "audio_data" in data:
                         audio_bytes = base64.b64decode(data["audio_data"])
                         await session.forward_audio_to_agent(audio_bytes)
+                
+                elif msg_type == "get_stats":
+                    # Send current session stats
+                    stats = session.get_session_stats()
+                    await session.client_ws.send_text(json.dumps({
+                        "type": "session_stats",
+                        "stats": stats
+                    }))
                 
                 elif msg_type == "end_session":
                     logger.info(f"[{session_id}] Ending session...")
@@ -107,7 +122,7 @@ async def websocket_voice_endpoint(
             del active_sessions[session_id]
 
 
-async def get_active_session(session_id: str) -> VoiceAgentSession | None:
+async def get_active_session(session_id: str) -> GeminiVoiceSession | None:
     """Get an active voice session by ID."""
     return active_sessions.get(session_id)
 

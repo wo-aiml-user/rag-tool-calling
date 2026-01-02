@@ -1,124 +1,70 @@
 """
-Voice Agent service for building Deepgram Voice Agent configuration.
-Uses existing prompt and function schemas from the application.
+Voice Agent service for building Gemini Live API configuration.
+Uses Google's Gemini native audio model for voice-to-voice conversations.
 """
-from typing import Dict, List
+from typing import Dict
 from loguru import logger
-from app.config import Settings
-from tools.tools_schema import retrieval_tool, search_articles, weather_tool
+from google.genai import types
 from app.RAG.prompt import get_voice_prompt
 
-def get_function_definitions_openai() -> List[Dict]:
-    """
-    Get the function definitions in OpenAI format.
-    Returns the same tools used in the chat RAG pipeline.
-    """
-    return [retrieval_tool, search_articles, weather_tool]
+
+# Audio configuration constants
+SEND_SAMPLE_RATE = 16000
+RECEIVE_SAMPLE_RATE = 24000
+
+# Gemini model for native audio
+GEMINI_VOICE_MODEL = "models/gemini-2.5-flash-native-audio-preview-09-2025"
 
 
-def convert_to_deepgram_format(openai_tools: List[Dict]) -> List[Dict]:
+def get_gemini_live_config() -> types.LiveConnectConfig:
     """
-    Convert Deepseek function calling format to Deepgram Voice Agent format.
+    Get the Gemini Live API configuration for voice-to-voice conversations.
     
-    Deepseek format:
-    {
-        "type": "function",
-        "function": {
-            "name": "...",
-            "description": "...",
-            "parameters": {...}
-        }
-    }
-    
-    Deepgram format:
-    {
-        "name": "...",
-        "description": "...",
-        "parameters": {...}
-    }
-    """
-    deepgram_tools = []
-    for tool in openai_tools:
-        if tool.get("type") == "function" and "function" in tool:
-            # Extract the inner function definition
-            deepgram_tools.append(tool["function"])
-        else:
-            deepgram_tools.append(tool)
-    return deepgram_tools
-
-
-def get_function_definitions_deepgram() -> List[Dict]:
-    """
-    Get function definitions in Deepgram Voice Agent format.
-    """
-    openai_tools = get_function_definitions_openai()
-    return convert_to_deepgram_format(openai_tools)
-
-
-async def get_voice_agent_settings(settings: Settings) -> Dict:
-    """
-    Configure Deepgram Voice Agent with DeepSeek as custom LLM.
-    Uses the existing prompt and function schema from the application.
-    
-    Args:
-        settings: Application settings containing API keys
-        
     Returns:
-        Voice Agent settings dictionary for Deepgram API
+        LiveConnectConfig for Gemini Live API connection
     """
-    logger.info("[VOICE_SERVICE] Building voice agent settings")
+    logger.info("[VOICE_SERVICE] Building Gemini Live config")
     
-    # Get function definitions in Deepgram format
-    function_definitions = get_function_definitions_deepgram()
-    logger.info(f"[VOICE_SERVICE] Loaded {len(function_definitions)} function definitions (Deepgram format)")
-    
-    # Get voice-optimized prompt
+    # Get voice-optimized prompt from centralized prompt module
     voice_prompt = get_voice_prompt()
-    logger.info("[VOICE_SERVICE] Loaded voice-optimized prompt")
+    logger.info("[VOICE_SERVICE] Loaded voice-optimized system instruction")
     
+    config = types.LiveConnectConfig(
+        response_modalities=["AUDIO"],
+        system_instruction=voice_prompt,
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Alnilam")
+            ),
+        ),
+        context_window_compression=types.ContextWindowCompressionConfig(
+            trigger_tokens=25600,
+            sliding_window=types.SlidingWindow(target_tokens=12800),
+        ),
+        input_audio_transcription=types.AudioTranscriptionConfig(),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
+    )
+    
+    logger.info("[VOICE_SERVICE] Gemini Live config created with voice='Alnilam'")
+    return config
+
+
+def get_audio_config() -> Dict:
+    """
+    Get audio configuration for client communication.
+    
+    Returns:
+        Dictionary with input/output audio settings
+    """
     return {
-        "type": "Settings",
-        "audio": {
-            "input": {
-                "encoding": "linear16",
-                "sample_rate": 16000
-            },
-            "output": {
-                "encoding": "linear16",
-                "sample_rate": 24000,
-                "container": "none"
-            }
+        "input": {
+            "encoding": "linear16",
+            "sample_rate": SEND_SAMPLE_RATE,
+            "channels": 1
         },
-        "agent": {
-            "language": "en",
-            "listen": {
-                "provider": {
-                    "type": "deepgram",
-                    "model": "nova-3"
-                }
-            },
-            "think": {
-                "provider": {
-                    "type": "open_ai",
-                    "model": "deepseek-chat",
-                    "temperature": 0.4
-                },
-                "endpoint": {
-                    "url": "https://api.deepseek.com/v1/chat/completions",
-                    "headers": {
-                        "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}"
-                    }
-                },
-                "prompt": voice_prompt,
-                "functions": function_definitions
-            },
-            "speak": {
-                "provider": {
-                    "type": "deepgram",
-                    "model": "aura-2-thalia-en"
-                }
-            },
-            "greeting": "Hello! I am Maya, a Business Consultant. How can I help you today?"
+        "output": {
+            "encoding": "linear16",
+            "sample_rate": RECEIVE_SAMPLE_RATE,
+            "channels": 1
         }
     }
-
