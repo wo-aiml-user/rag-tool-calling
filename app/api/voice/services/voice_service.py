@@ -34,7 +34,7 @@ def get_gemini_live_config() -> types.LiveConnectConfig:
         system_instruction=voice_prompt,
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Alnilam")
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
             ),
             language_code="en-IN",
         ),
