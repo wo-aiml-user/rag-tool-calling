@@ -36,6 +36,7 @@ def get_gemini_live_config() -> types.LiveConnectConfig:
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Alnilam")
             ),
+            language_code="en-IN",
         ),
         context_window_compression=types.ContextWindowCompressionConfig(
             trigger_tokens=25600,
