@@ -4,8 +4,12 @@ import ResponseBubble from './components/ResponseBubble';
 import ChatHistory from './components/ChatHistory';
 import { v4 as uuidv4 } from 'uuid';
 
-// Deepgram Voice Agent API backend
-const WS_URL = "ws://localhost:8000";
+// Gemini Voice Agent API via Vite proxy
+const getWebSocketUrl = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  return `${protocol}//${host}`;
+};
 
 // Audio configuration
 const INPUT_SAMPLE_RATE = 16000;  // For recording
@@ -119,7 +123,8 @@ function App() {
       return;
     }
 
-    const wsUrl = `${WS_URL}/api/ws/voice/${sessionIdRef.current}`;
+    const wsUrl = `${getWebSocketUrl()}/api/ws/voice/${sessionIdRef.current}`;
+    console.log('Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -578,8 +583,8 @@ function App() {
                     <div className="bg-white/5 rounded-lg p-3">
                       <span className="text-purple-400 text-xs block">Sentiment</span>
                       <span className={`font-medium capitalize ${transcriptAnalysis.sentiment === 'positive' ? 'text-green-400' :
-                          transcriptAnalysis.sentiment === 'negative' ? 'text-red-400' :
-                            'text-yellow-400'
+                        transcriptAnalysis.sentiment === 'negative' ? 'text-red-400' :
+                          'text-yellow-400'
                         }`}>{transcriptAnalysis.sentiment}</span>
                     </div>
                   )}
