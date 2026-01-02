@@ -56,12 +56,14 @@ class GeminiVoiceSession:
         # Conversation history for analysis
         self.conversation_history: List[Dict[str, str]] = []
         
-        # Tasks
-        self.receive_task: Optional[asyncio.Task] = None
-        self.send_audio_task: Optional[asyncio.Task] = None
+        # Main session task
+        self.session_task: Optional[asyncio.Task] = None
+        
+        # Event to signal when session should stop
+        self._stop_event = asyncio.Event()
     
-    async def connect_to_agent(self) -> bool:
-        """Connect to Gemini Live API."""
+    async def connect_and_run(self) -> bool:
+        """Connect to Gemini Live API and start the audio streaming session."""
         try:
             gemini_api_key = self.settings.GEMINI_API_KEY
             if not gemini_api_key:
@@ -79,31 +81,49 @@ class GeminiVoiceSession:
             # Get the live config
             config = get_gemini_live_config()
             
-            # Connect to Gemini Live
-            self.gemini_session = await self.gemini_client.aio.live.connect(
-                model=GEMINI_VOICE_MODEL,
-                config=config
-            )
+            # Start the session task that manages the context manager
+            self.session_task = asyncio.create_task(self._run_session(config))
             
-            logger.info(f"[{self.session_id}] Connected to Gemini Live API")
-            return True
+            # Wait a moment for connection to establish
+            await asyncio.sleep(0.5)
             
+            if self.gemini_session:
+                logger.info(f"[{self.session_id}] Connected to Gemini Live API")
+                return True
+            else:
+                logger.error(f"[{self.session_id}] Failed to establish Gemini session")
+                return False
+                
         except Exception as e:
             logger.error(f"[{self.session_id}] Failed to connect to Gemini Live: {e}")
             traceback.print_exc()
             return False
     
-    async def start_streaming(self):
-        """Start the audio streaming tasks."""
-        if not self.gemini_session:
-            logger.error(f"[{self.session_id}] Cannot start streaming - not connected")
-            return
-        
-        # Start receiving from Gemini in background
-        self.receive_task = asyncio.create_task(self._receive_from_gemini())
-        self.send_audio_task = asyncio.create_task(self._send_audio_to_client())
-        
-        logger.info(f"[{self.session_id}] Audio streaming tasks started")
+    async def _run_session(self, config):
+        """Run the Gemini Live session within async context manager."""
+        try:
+            async with self.gemini_client.aio.live.connect(
+                model=GEMINI_VOICE_MODEL,
+                config=config
+            ) as session:
+                self.gemini_session = session
+                logger.info(f"[{self.session_id}] Gemini session established")
+                
+                # Create tasks for receiving and sending audio
+                async with asyncio.TaskGroup() as tg:
+                    tg.create_task(self._receive_from_gemini())
+                    tg.create_task(self._send_audio_to_client())
+                    
+                    # Wait until stop event is set
+                    await self._stop_event.wait()
+                    
+        except asyncio.CancelledError:
+            logger.info(f"[{self.session_id}] Session task cancelled")
+        except Exception as e:
+            logger.error(f"[{self.session_id}] Session error: {e}")
+            traceback.print_exc()
+        finally:
+            self.gemini_session = None
     
     async def forward_audio_to_agent(self, audio_data: bytes):
         """Forward audio from client to Gemini Live API."""
@@ -129,6 +149,9 @@ class GeminiVoiceSession:
                     model_text = ""
                     
                     async for response in turn:
+                        if not self.is_active:
+                            break
+                            
                         # Handle audio data
                         if data := response.data:
                             self.audio_out_queue.put_nowait(data)
@@ -230,8 +253,9 @@ class GeminiVoiceSession:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.error(f"[{self.session_id}] Error in receive loop: {e}")
-                    traceback.print_exc()
+                    if self.is_active:
+                        logger.error(f"[{self.session_id}] Error in receive loop: {e}")
+                        traceback.print_exc()
                     break
                     
         except Exception as e:
@@ -366,20 +390,8 @@ class GeminiVoiceSession:
         """Close the Gemini Live session and analyze transcript."""
         self.is_active = False
         
-        # Cancel streaming tasks
-        if self.receive_task:
-            self.receive_task.cancel()
-            try:
-                await self.receive_task
-            except asyncio.CancelledError:
-                pass
-        
-        if self.send_audio_task:
-            self.send_audio_task.cancel()
-            try:
-                await self.send_audio_task
-            except asyncio.CancelledError:
-                pass
+        # Signal stop to the session task
+        self._stop_event.set()
         
         # Analyze conversation before closing
         if self.conversation_history:
@@ -402,12 +414,12 @@ class GeminiVoiceSession:
         except Exception:
             pass
         
-        # Close Gemini session
-        if self.gemini_session:
+        # Cancel the session task
+        if self.session_task:
+            self.session_task.cancel()
             try:
-                # Session cleanup - genai client handles this
-                self.gemini_session = None
-            except Exception:
+                await self.session_task
+            except asyncio.CancelledError:
                 pass
         
         logger.info(f"[{self.session_id}] Session closed - Turns: {self.turn_count}, "

@@ -67,12 +67,9 @@ async def websocket_voice_endpoint(
                 
                 if msg_type == "start_session":
                     logger.info(f"[{session_id}] Starting Gemini voice session...")
-                    success = await session.connect_to_agent()
+                    success = await session.connect_and_run()
                     
                     if success:
-                        # Start streaming tasks in background
-                        await session.start_streaming()
-                        
                         # Send session started and audio config
                         await session.client_ws.send_text(json.dumps({
                             "type": "session_started",
