@@ -14,7 +14,7 @@ from app.config import Settings
 from app.api.voice.services.voice_service import get_voice_agent_settings
 from app.RAG.prompt import get_transcript_analysis_prompt
 from tools.functions import get_current_weather, search_articles, retrieve_documents
-from app.RAG.deepseek_client import DeepSeekClient
+from app.RAG.gemini_client import GeminiClient
 import traceback
 from typing import List, Dict
 
@@ -40,8 +40,12 @@ class VoiceAgentSession:
         self.playback_started_sent = False
         self.conversation_history: List[Dict[str, str]] = []  # Store conversation for analysis
     
-    async def connect_to_agent(self) -> bool:
-        """Connect to Deepgram Voice Agent API."""
+    async def connect_to_agent(self, context: dict = None) -> bool:
+        """Connect to Deepgram Voice Agent API.
+        
+        Args:
+            context: Optional dict with pre-provided user info (name, role, years_of_experience)
+        """
         try:
             deepgram_api_key = self.settings.DEEPGRAM_API_KEY
             if not deepgram_api_key:
@@ -62,8 +66,8 @@ class VoiceAgentSession:
             )
             logger.info(f"[{self.session_id}] Connected to Deepgram Voice Agent")
             
-            # Send Settings message to configure the agent
-            settings_dict = await get_voice_agent_settings(self.settings)
+            # Send Settings message to configure the agent (with user context for personalized prompt)
+            settings_dict = await get_voice_agent_settings(self.settings, context=context)
             await self.agent_ws.send(json.dumps(settings_dict))
             logger.info(f"[{self.session_id}] Sent Settings to Voice Agent")
             
@@ -388,7 +392,7 @@ class VoiceAgentSession:
         analysis_prompt = get_transcript_analysis_prompt(conversation_text)
 
         try:
-            client = DeepSeekClient(api_key=self.settings.DEEPSEEK_API_KEY)
+            client = GeminiClient(api_key=self.settings.GEMINI_API_KEY)
             response = client.chat_completion(
                 messages=[
                     {"role": "system", "content": "You are an expert business analyst. Analyze conversations and extract structured insights. Always respond with valid JSON."},

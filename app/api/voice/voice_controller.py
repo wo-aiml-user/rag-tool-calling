@@ -65,8 +65,14 @@ async def websocket_voice_endpoint(
                 msg_type = data.get("type")
                 
                 if msg_type == "start_session":
-                    logger.info(f"[{session_id}] Starting voice agent session...")
-                    success = await session.connect_to_agent()
+                    # Extract user context if provided
+                    user_context = data.get("context", {})
+                    if user_context:
+                        logger.info(f"[{session_id}] Starting session with context: {user_context}")
+                    else:
+                        logger.info(f"[{session_id}] Starting voice agent session...")
+                    
+                    success = await session.connect_to_agent(context=user_context)
                     
                     if success:
                         # Start receiving from agent in background

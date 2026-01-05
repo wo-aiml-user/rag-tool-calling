@@ -1,10 +1,10 @@
 """
-RAG chain implementation using DeepSeek with optimized single LLM call.
+RAG chain implementation using Gemini with optimized single LLM call.
 Handles tool calling intelligently with proper context formatting and token tracking.
 """
 from typing import Dict, Any
 from pymilvus import utility, connections
-from app.RAG.deepseek_client import DeepSeekClient
+from app.RAG.gemini_client import GeminiClient
 from app.RAG.prompt import get_system_prompt
 from app.config import Settings
 from app.api.chat.models.chat_model import ChatRequest
@@ -41,12 +41,12 @@ async def execute_rag_chain(request: ChatRequest, collection_name: str, settings
     if not collection_exists:
         logger.warning(f"[RAG_CHAIN] Collection {collection_name} does not exist")
 
-    # Initialize DeepSeek client
-    deepseek = DeepSeekClient(
-        api_key=settings.DEEPSEEK_API_KEY,
-        model="deepseek-chat"
+    # Initialize Gemini client
+    gemini = GeminiClient(
+        api_key=settings.GEMINI_API_KEY,
+        model="gemini-2.5-flash"
     )
-    logger.info("[RAG_CHAIN] DeepSeek client initialized")
+    logger.info("[RAG_CHAIN] Gemini client initialized")
     
     # Prepare messages with system prompt
     messages = [
@@ -67,9 +67,9 @@ async def execute_rag_chain(request: ChatRequest, collection_name: str, settings
         "embedding_tokens": 0
     }
     
-    # LLM call with tools - let DeepSeek decide
-    logger.info("[RAG_CHAIN] Making DeepSeek call with tools")
-    response = deepseek.chat_completion(
+    # LLM call with tools - let Gemini decide
+    logger.info("[RAG_CHAIN] Making Gemini call with tools")
+    response = gemini.chat_completion(
         messages=messages,
         tools=[retrieval_tool, search_articles, weather_tool],
         tool_choice="auto",
@@ -77,7 +77,7 @@ async def execute_rag_chain(request: ChatRequest, collection_name: str, settings
     )
     
     # Update token usage
-    usage = deepseek.get_usage(response)
+    usage = gemini.get_usage(response)
     total_token_usage["llm_input_tokens"] += usage.get("prompt_tokens", 0)
     total_token_usage["llm_output_tokens"] += usage.get("completion_tokens", 0)
     logger.info(f"[RAG_CHAIN] Initial call tokens: {usage}")
@@ -150,14 +150,14 @@ async def execute_rag_chain(request: ChatRequest, collection_name: str, settings
             })
         
         # Second call: Generate final answer with tool results
-        logger.info("[RAG_CHAIN] Making final DeepSeek call with tool results")
-        final_response = deepseek.chat_completion(
+        logger.info("[RAG_CHAIN] Making final Gemini call with tool results")
+        final_response = gemini.chat_completion(
             messages=messages,
             temperature=0.6,
             tool_choice="none"
         )
         
-        final_usage = deepseek.get_usage(final_response)
+        final_usage = gemini.get_usage(final_response)
         total_token_usage["llm_input_tokens"] += final_usage.get("prompt_tokens", 0)
         total_token_usage["llm_output_tokens"] += final_usage.get("completion_tokens", 0)
         logger.info(f"[RAG_CHAIN] Final call tokens: {final_usage}")

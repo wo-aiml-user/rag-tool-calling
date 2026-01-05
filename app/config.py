@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     
     # DeepSeek configuration
     DEEPSEEK_API_KEY: str = ""
+    
+    # Gemini configuration
+    GEMINI_API_KEY: str = ""
 
     #perplexity configuration
     PERPLEXITY_API_KEY: str = ""

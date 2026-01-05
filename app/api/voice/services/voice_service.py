@@ -18,9 +18,9 @@ def get_function_definitions_openai() -> List[Dict]:
 
 def convert_to_deepgram_format(openai_tools: List[Dict]) -> List[Dict]:
     """
-    Convert Deepseek function calling format to Deepgram Voice Agent format.
+    Convert OpenAI function calling format to Deepgram Voice Agent format.
     
-    Deepseek format:
+    OpenAI format:
     {
         "type": "function",
         "function": {
@@ -55,26 +55,34 @@ def get_function_definitions_deepgram() -> List[Dict]:
     return convert_to_deepgram_format(openai_tools)
 
 
-async def get_voice_agent_settings(settings: Settings) -> Dict:
+async def get_voice_agent_settings(settings: Settings, context: dict = None) -> Dict:
     """
-    Configure Deepgram Voice Agent with DeepSeek as custom LLM.
+    Configure Deepgram Voice Agent with Gemini as the LLM provider.
     Uses the existing prompt and function schema from the application.
     
     Args:
         settings: Application settings containing API keys
+        context: Optional dict with pre-provided user info (name, role, years_of_experience)
         
     Returns:
         Voice Agent settings dictionary for Deepgram API
     """
-    logger.info("[VOICE_SERVICE] Building voice agent settings")
+    context = context or {}
+    logger.info(f"[VOICE_SERVICE] Building voice agent settings with Gemini (context: {context})")
     
     # Get function definitions in Deepgram format
     function_definitions = get_function_definitions_deepgram()
     logger.info(f"[VOICE_SERVICE] Loaded {len(function_definitions)} function definitions (Deepgram format)")
     
-    # Get voice-optimized prompt
-    voice_prompt = get_voice_prompt()
+    # Get voice-optimized prompt with user context
+    voice_prompt = get_voice_prompt(context=context)
     logger.info("[VOICE_SERVICE] Loaded voice-optimized prompt")
+    
+    # Customize greeting based on provided context
+    if context.get('name'):
+        greeting = f"Hey {context['name']}, this is Jane. How is it going?"
+    else:
+        greeting = "Hello! I'm Jane, how is it going?"
     
     return {
         "type": "Settings",
@@ -99,14 +107,13 @@ async def get_voice_agent_settings(settings: Settings) -> Dict:
             },
             "think": {
                 "provider": {
-                    "type": "open_ai",
-                    "model": "deepseek-chat",
+                    "type": "google",
                     "temperature": 0.4
                 },
                 "endpoint": {
-                    "url": "https://api.deepseek.com/v1/chat/completions",
+                    "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
                     "headers": {
-                        "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}"
+                        "x-goog-api-key": settings.GEMINI_API_KEY
                     }
                 },
                 "prompt": voice_prompt,
@@ -115,10 +122,10 @@ async def get_voice_agent_settings(settings: Settings) -> Dict:
             "speak": {
                 "provider": {
                     "type": "deepgram",
-                    "model": "aura-2-thalia-en"
+                    "model": "aura-2-janus-en"
                 }
             },
-            "greeting": "Hello! I am Maya, a Business Consultant. How can I help you today?"
+            "greeting": greeting
         }
     }
 

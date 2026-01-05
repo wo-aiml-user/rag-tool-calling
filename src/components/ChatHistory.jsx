@@ -6,22 +6,26 @@ const ChatHistory = ({ chatHistory }) => {
   }
 
   return (
-    <div className="space-y-4 max-h-96 overflow-y-auto">
+    <div className="space-y-4">
       {chatHistory.map((chat) => (
         <div key={chat.id} className="space-y-3">
           {/* User Message */}
-          <div className="flex justify-end">
-            <div className="bg-blue-500 text-white rounded-2xl px-4 py-2 max-w-xs">
-              <p className="text-sm">{chat.userMessage}</p>
+          {chat.userMessage && (
+            <div className="flex justify-end">
+              <div className="bg-white text-black rounded-2xl rounded-tr-sm px-4 py-3 max-w-[85%] shadow-lg">
+                <p className="text-sm">{chat.userMessage}</p>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Assistant Message */}
-          <div className="flex justify-start">
-            <div className="bg-white rounded-2xl px-4 py-2 max-w-xs shadow-sm">
-              <p className="text-sm text-gray-800">{chat.assistantMessage}</p>
+          {chat.assistantMessage && (
+            <div className="flex justify-start">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[85%]">
+                <p className="text-sm text-neutral-200">{chat.assistantMessage}</p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       ))}
     </div>

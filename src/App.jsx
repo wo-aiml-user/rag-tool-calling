@@ -1,15 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import MicButton from './components/MicButton';
-import ResponseBubble from './components/ResponseBubble';
 import ChatHistory from './components/ChatHistory';
 import { v4 as uuidv4 } from 'uuid';
 
-// Deepgram Voice Agent API backend
-const WS_URL = "ws://localhost:8000";
+// Dynamic WebSocket URL based on current host
+const getWsUrl = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  return `${protocol}//${host}`;
+};
+const WS_URL = getWsUrl();
 
 // Audio configuration
-const INPUT_SAMPLE_RATE = 16000;  // For recording
-const OUTPUT_SAMPLE_RATE = 24000; // For playback
+const INPUT_SAMPLE_RATE = 16000;
+const OUTPUT_SAMPLE_RATE = 24000;
 const AUDIO_CHANNELS = 1;
 
 function App() {
@@ -24,6 +28,14 @@ function App() {
   const [transcriptAnalysis, setTranscriptAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  // User info for personalized prompts
+  const [userName, setUserName] = useState('');
+  const [userRole, setUserRole] = useState('');
+  const [userIndustry, setUserIndustry] = useState('');
+  const [yearsOfExperience, setYearsOfExperience] = useState('');
+  const [showUserInfoModal, setShowUserInfoModal] = useState(false);
+  const [hasStartedOnce, setHasStartedOnce] = useState(false);
+
   const websocketRef = useRef(null);
   const audioContextRef = useRef(null);
   const playbackContextRef = useRef(null);
@@ -33,15 +45,18 @@ function App() {
   const audioQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
   const nextPlayTimeRef = useRef(0);
-  const currentTranscriptRef = useRef('');
+  const currentTranscriptRef = useRef('');  // Current utterance
+  const accumulatedTranscriptRef = useRef('');  // All user messages in current turn
   const currentResponseRef = useRef('');
+  const accumulatedResponseRef = useRef('');  // All assistant responses in current turn
+  const isAssistantSpeakingRef = useRef(false);  // Track speaking state for audio muting
+  const chatEndRef = useRef(null);
 
   useEffect(() => {
     sessionIdRef.current = uuidv4();
     setConnectionStatus('ready');
     console.log('Client session ID created:', sessionIdRef.current);
 
-    // Initialize AudioContext for streaming playback
     playbackContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
       sampleRate: OUTPUT_SAMPLE_RATE
     });
@@ -54,7 +69,11 @@ function App() {
     };
   }, []);
 
-  // Process and play audio queue
+  // Auto-scroll to bottom when chat updates
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory, transcript, streamingResponse, transcriptAnalysis]);
+
   const playNextAudioChunk = useCallback(async () => {
     if (isPlayingRef.current || audioQueueRef.current.length === 0) {
       return;
@@ -66,7 +85,6 @@ function App() {
       const audioBase64 = audioQueueRef.current.shift();
 
       try {
-        // Decode base64 to ArrayBuffer
         const binaryString = atob(audioBase64);
         const len = binaryString.length;
         const bytes = new Uint8Array(len);
@@ -74,14 +92,12 @@ function App() {
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Convert Int16 PCM to Float32 for Web Audio API
         const pcmData = new Int16Array(bytes.buffer);
         const floatData = new Float32Array(pcmData.length);
         for (let i = 0; i < pcmData.length; i++) {
           floatData[i] = pcmData[i] / 32768.0;
         }
 
-        // Create audio buffer
         const audioBuffer = playbackContextRef.current.createBuffer(
           AUDIO_CHANNELS,
           floatData.length,
@@ -89,7 +105,6 @@ function App() {
         );
         audioBuffer.getChannelData(0).set(floatData);
 
-        // Schedule playback
         const source = playbackContextRef.current.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(playbackContextRef.current.destination);
@@ -150,8 +165,14 @@ function App() {
 
         case 'transcript':
           console.log('Transcript:', data.text);
-          setTranscript(data.text);
+          // Accumulate transcripts - each transcript is a complete utterance
+          if (accumulatedTranscriptRef.current) {
+            accumulatedTranscriptRef.current += ' ' + data.text;
+          } else {
+            accumulatedTranscriptRef.current = data.text;
+          }
           currentTranscriptRef.current = data.text;
+          setTranscript(accumulatedTranscriptRef.current);  // Show accumulated
           break;
 
         case 'thinking':
@@ -161,19 +182,27 @@ function App() {
 
         case 'response':
           console.log('Response:', data.text);
-          setStreamingResponse(data.text);
+          // Accumulate responses - append each new response
+          if (accumulatedResponseRef.current) {
+            accumulatedResponseRef.current += ' ' + data.text;
+          } else {
+            accumulatedResponseRef.current = data.text;
+          }
           currentResponseRef.current = data.text;
+          setStreamingResponse(accumulatedResponseRef.current);  // Show accumulated
           break;
 
         case 'playback_started':
           console.log('Agent speaking started');
           setIsAssistantSpeaking(true);
+          isAssistantSpeakingRef.current = true;  // Update ref for audio muting
           setIsProcessing(false);
           break;
 
         case 'playback_finished':
           console.log('Agent speaking finished');
           setIsAssistantSpeaking(false);
+          isAssistantSpeakingRef.current = false;  // Update ref for audio muting
           finalizeResponse();
           break;
 
@@ -220,8 +249,9 @@ function App() {
   };
 
   const finalizeResponse = () => {
-    const userMsg = currentTranscriptRef.current;
-    const assistantMsg = currentResponseRef.current;
+    // Use accumulated transcript and response for full messages
+    const userMsg = accumulatedTranscriptRef.current || currentTranscriptRef.current;
+    const assistantMsg = accumulatedResponseRef.current || currentResponseRef.current;
 
     if (userMsg || assistantMsg) {
       const newChatItem = {
@@ -242,10 +272,11 @@ function App() {
     setTranscript('');
     setStreamingResponse('');
     currentTranscriptRef.current = '';
+    accumulatedTranscriptRef.current = '';  // Reset accumulated transcript
     currentResponseRef.current = '';
+    accumulatedResponseRef.current = '';  // Reset accumulated response
   };
 
-  // Convert ArrayBuffer to base64
   const arrayBufferToBase64 = (buffer) => {
     const bytes = new Uint8Array(buffer);
     let binary = '';
@@ -263,33 +294,46 @@ function App() {
       }
 
       setIsRecording(true);
+      setHasStartedOnce(true);
       setResponse(null);
       setTranscript('');
       setStreamingResponse('');
       audioQueueRef.current = [];
       nextPlayTimeRef.current = 0;
 
-      sessionIdRef.current = uuidv4();
-      initializeWebSocket();
+      // Only create new session if we don't have an active connection
+      const needsNewSession = !websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN;
 
-      await new Promise((resolve, reject) => {
-        const checkConnection = () => {
-          if (websocketRef.current?.readyState === WebSocket.OPEN) {
-            resolve();
-          } else if (websocketRef.current?.readyState === WebSocket.CLOSING || websocketRef.current?.readyState === WebSocket.CLOSED) {
-            reject(new Error('WebSocket connection failed to open'));
-          } else {
-            setTimeout(checkConnection, 100);
-          }
-        };
-        checkConnection();
-      });
+      if (needsNewSession) {
+        sessionIdRef.current = uuidv4();
+        initializeWebSocket();
 
-      // Start voice agent session
-      websocketRef.current.send(JSON.stringify({ type: 'start_session' }));
-      await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise((resolve, reject) => {
+          const checkConnection = () => {
+            if (websocketRef.current?.readyState === WebSocket.OPEN) {
+              resolve();
+            } else if (websocketRef.current?.readyState === WebSocket.CLOSING || websocketRef.current?.readyState === WebSocket.CLOSED) {
+              reject(new Error('WebSocket connection failed to open'));
+            } else {
+              setTimeout(checkConnection, 100);
+            }
+          };
+          checkConnection();
+        });
 
-      // Request microphone access
+        const userContext = {};
+        if (userName.trim()) userContext.name = userName.trim();
+        if (userRole.trim()) userContext.role = userRole.trim();
+        if (userIndustry.trim()) userContext.industry = userIndustry.trim();
+        if (yearsOfExperience.trim()) userContext.years_of_experience = yearsOfExperience.trim();
+
+        websocketRef.current.send(JSON.stringify({
+          type: 'start_session',
+          context: Object.keys(userContext).length > 0 ? userContext : undefined
+        }));
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -302,21 +346,22 @@ function App() {
 
       audioStreamRef.current = stream;
 
-      // Create AudioContext for capturing raw PCM
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: INPUT_SAMPLE_RATE
       });
 
       const source = audioContextRef.current.createMediaStreamSource(stream);
 
-      // Try AudioWorklet first, fall back to ScriptProcessor
       try {
         await audioContextRef.current.audioWorklet.addModule('/pcm-processor.js');
 
         const workletNode = new AudioWorkletNode(audioContextRef.current, 'pcm-processor');
 
         workletNode.port.onmessage = (event) => {
-          if (event.data.type === 'audio' && websocketRef.current?.readyState === WebSocket.OPEN) {
+          // Don't send audio while assistant is speaking (prevents self-triggering)
+          if (event.data.type === 'audio' &&
+            websocketRef.current?.readyState === WebSocket.OPEN &&
+            !isAssistantSpeakingRef.current) {
             const base64Data = arrayBufferToBase64(event.data.buffer);
             websocketRef.current.send(JSON.stringify({
               type: 'audio_chunk',
@@ -333,7 +378,6 @@ function App() {
       } catch (workletError) {
         console.warn('AudioWorklet not available, using ScriptProcessor:', workletError);
 
-        // Fallback to ScriptProcessor
         const bufferSize = 4096;
         const processorNode = audioContextRef.current.createScriptProcessor(bufferSize, 1, 1);
 
@@ -354,7 +398,6 @@ function App() {
         };
 
         source.connect(processorNode);
-        // Connect through silent gain to make it work
         const silentGain = audioContextRef.current.createGain();
         silentGain.gain.value = 0;
         processorNode.connect(silentGain);
@@ -390,7 +433,6 @@ function App() {
       audioStreamRef.current = null;
     }
 
-    // Send end_session to trigger transcript analysis
     if (websocketRef.current?.readyState === WebSocket.OPEN) {
       setIsAnalyzing(true);
       websocketRef.current.send(JSON.stringify({ type: 'end_session' }));
@@ -438,210 +480,302 @@ function App() {
     audioQueueRef.current = [];
   };
 
-  const getConnectionStatusText = () => {
-    switch (connectionStatus) {
-      case 'ready': return 'Ready';
-      case 'connected': return 'Connected';
-      case 'error': return 'Connection Error';
-      default: return 'Initializing...';
+  const handleMicClick = () => {
+    if (isRecording) {
+      handleRecordingStop();
+    } else if (!hasStartedOnce) {
+      setShowUserInfoModal(true);
+    } else {
+      handleRecordingStart();
     }
   };
 
+  const hasUserInfo = userName || userRole || yearsOfExperience;
+  const hasConversation = chatHistory.length > 0 || transcript || streamingResponse;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900 flex flex-col items-center justify-center p-4 font-sans">
-      <div className="max-w-2xl w-full space-y-6">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold text-white mb-2">Voice Assistant</h1>
-          <p className="text-white/80 mb-2">Low-latency voice agent powered by Deepgram</p>
-          <div className="flex items-center justify-center space-x-2 text-sm text-white/60">
-            <span>Status: {getConnectionStatusText()}</span>
-            {isRecording && <span className="text-red-400 animate-pulse">🎙️ Recording</span>}
-            {isProcessing && <span className="text-yellow-400 animate-pulse">🧠 Processing</span>}
-            {isAssistantSpeaking && <span className="text-orange-400 animate-pulse">🔊 Speaking</span>}
-          </div>
-        </div>
+    <div className="min-h-screen bg-gradient-to-b from-black via-neutral-950 to-black flex flex-col font-sans">
 
-        <ChatHistory chatHistory={chatHistory} />
+      {/* User Info Modal */}
+      {showUserInfoModal && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-b from-neutral-900 to-neutral-950 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-neutral-800">
+            <h3 className="text-white font-medium text-lg mb-1">
+              {hasStartedOnce ? 'Edit Profile' : 'Before we begin'}
+            </h3>
+            <p className="text-neutral-500 text-sm mb-5">
+              This helps personalize your conversation
+            </p>
 
-        {transcript && (
-          <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 text-white/90">
-            <div className="flex items-start space-x-2">
-              <span className="text-blue-400 text-sm">You:</span>
-              <span>{transcript}</span>
-            </div>
-          </div>
-        )}
-
-        {streamingResponse && (
-          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4">
-            <div className="flex items-start space-x-2">
-              <span className="text-purple-400 text-sm">
-                {isAssistantSpeaking ? '🔊 Assistant:' : 'Assistant:'}
-              </span>
-              <span className="text-white">{streamingResponse}</span>
-              {isAssistantSpeaking && <span className="animate-pulse text-purple-400">▋</span>}
-            </div>
-          </div>
-        )}
-
-        {response && !streamingResponse && !isAssistantSpeaking && <ResponseBubble response={response} />}
-
-        {isProcessing && !streamingResponse && !transcript && (
-          <div className="flex justify-center">
-            <div className="bg-white/10 backdrop-blur-sm rounded-full px-6 py-3 text-white">
-              <div className="flex items-center space-x-3">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                <span>🧠 Thinking...</span>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-neutral-400 text-xs uppercase tracking-wider mb-1.5">Name</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  placeholder="Your name"
+                  autoFocus
+                  className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-white placeholder-neutral-600 text-sm focus:outline-none focus:border-red-500/50 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-neutral-400 text-xs uppercase tracking-wider mb-1.5">Role</label>
+                <input
+                  type="text"
+                  value={userRole}
+                  onChange={(e) => setUserRole(e.target.value)}
+                  placeholder="e.g. Product Manager"
+                  className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-white placeholder-neutral-600 text-sm focus:outline-none focus:border-red-500/50 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-neutral-400 text-xs uppercase tracking-wider mb-1.5">Industry</label>
+                <input
+                  type="text"
+                  value={userIndustry}
+                  onChange={(e) => setUserIndustry(e.target.value)}
+                  placeholder="e.g. Healthcare, Fintech"
+                  className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-white placeholder-neutral-600 text-sm focus:outline-none focus:border-red-500/50 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-neutral-400 text-xs uppercase tracking-wider mb-1.5">Experience</label>
+                <input
+                  type="text"
+                  value={yearsOfExperience}
+                  onChange={(e) => setYearsOfExperience(e.target.value)}
+                  placeholder="e.g. 5 years"
+                  className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-white placeholder-neutral-600 text-sm focus:outline-none focus:border-red-500/50 transition-colors"
+                />
               </div>
             </div>
-          </div>
-        )}
 
-        <div className="flex justify-center pt-4">
-          <MicButton
-            isRecording={isRecording}
-            onRecordingStart={handleRecordingStart}
-            onRecordingStop={handleRecordingStop}
-            disabled={isProcessing || isAssistantSpeaking || (connectionStatus === 'error' && !isRecording)}
-          />
-        </div>
-
-        {connectionStatus === 'error' && (
-          <div className="text-center">
-            <button
-              onClick={handleReconnect}
-              className="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
-            >
-              Reconnect
-            </button>
-          </div>
-        )}
-
-        {isAnalyzing && (
-          <div className="flex justify-center">
-            <div className="bg-white/10 backdrop-blur-sm rounded-full px-6 py-3 text-white">
-              <div className="flex items-center space-x-3">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-purple-400"></div>
-                <span>📊 Analyzing conversation...</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {transcriptAnalysis && !isAnalyzing && (
-          <div className="bg-gradient-to-r from-purple-500/20 to-blue-500/20 backdrop-blur-sm rounded-2xl p-6 border border-purple-500/30">
-            <div className="flex justify-between items-start mb-4">
-              <h3 className="text-xl font-semibold text-white flex items-center">
-                <span className="mr-2">📊</span> Conversation Analysis
-              </h3>
+            <div className="flex gap-3 mt-6">
               <button
-                onClick={() => setTranscriptAnalysis(null)}
-                className="text-white/60 hover:text-white transition-colors text-xl"
+                onClick={() => {
+                  setShowUserInfoModal(false);
+                  if (!hasStartedOnce) {
+                    handleRecordingStart();
+                  }
+                }}
+                className="flex-1 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white font-medium py-3 px-4 rounded-lg transition-all text-sm shadow-lg shadow-red-500/20"
               >
-                ✕
+                {hasStartedOnce ? 'Save' : 'Start Conversation'}
+              </button>
+              <button
+                onClick={() => setShowUserInfoModal(false)}
+                className="px-4 py-3 text-neutral-500 hover:text-white transition-colors text-sm"
+              >
+                {hasStartedOnce ? 'Cancel' : 'Skip'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
 
-            {transcriptAnalysis.error ? (
-              <p className="text-red-400">{transcriptAnalysis.error}</p>
-            ) : (
-              <div className="space-y-4 text-white/90">
-                {/* Summary Section */}
-                {transcriptAnalysis.summary && (
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <h4 className="text-purple-300 font-medium mb-2">📝 Summary</h4>
-                    <p className="text-white/80 leading-relaxed">{transcriptAnalysis.summary}</p>
-                  </div>
-                )}
+      {/* Main Content - Scrollable */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-2xl mx-auto px-4 py-6">
 
-                {/* Industry & Position */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {transcriptAnalysis.industry && (
-                    <div className="bg-white/5 rounded-lg p-3">
-                      <span className="text-purple-400 text-xs block">Industry</span>
-                      <span className="font-medium">{transcriptAnalysis.industry}</span>
-                    </div>
-                  )}
-                  {transcriptAnalysis.position && (
-                    <div className="bg-white/5 rounded-lg p-3">
-                      <span className="text-purple-400 text-xs block">Position</span>
-                      <span className="font-medium">{transcriptAnalysis.position}</span>
-                    </div>
-                  )}
-                  {transcriptAnalysis.tenure && (
-                    <div className="bg-white/5 rounded-lg p-3">
-                      <span className="text-purple-400 text-xs block">Tenure</span>
-                      <span className="font-medium">{transcriptAnalysis.tenure}</span>
-                    </div>
-                  )}
-                  {transcriptAnalysis.sentiment && (
-                    <div className="bg-white/5 rounded-lg p-3">
-                      <span className="text-purple-400 text-xs block">Sentiment</span>
-                      <span className={`font-medium capitalize ${transcriptAnalysis.sentiment === 'positive' ? 'text-green-400' :
-                          transcriptAnalysis.sentiment === 'negative' ? 'text-red-400' :
-                            'text-yellow-400'
-                        }`}>{transcriptAnalysis.sentiment}</span>
-                    </div>
-                  )}
-                </div>
+          {/* Header */}
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-white tracking-tight">Jane</h1>
+            <p className="text-neutral-500 text-sm mt-1">AI Business Consultant</p>
+            {hasUserInfo && !isRecording && (
+              <button
+                onClick={() => setShowUserInfoModal(true)}
+                className="mt-2 text-xs text-neutral-500 hover:text-red-400 transition-colors"
+              >
+                {userName ? `Hi, ${userName}` : 'Edit profile'} →
+              </button>
+            )}
+          </div>
 
-                {/* Key Insights */}
-                {transcriptAnalysis.key_insights && transcriptAnalysis.key_insights.length > 0 && (
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <h4 className="text-green-300 font-medium mb-2">💡 Key Insights</h4>
-                    <ul className="space-y-2">
-                      {transcriptAnalysis.key_insights.map((insight, i) => (
-                        <li key={i} className="flex items-start text-white/80">
-                          <span className="text-green-400 mr-2">•</span>
-                          <span>{insight}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+          {/* Empty State - Vertically Centered */}
+          {!hasConversation && !isRecording && (
+            <div className="flex flex-col items-center justify-center min-h-[50vh]">
+              <div className="w-16 h-16 rounded-full border border-neutral-800 flex items-center justify-center mb-6">
+                <svg className="w-7 h-7 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-medium text-white mb-2">Ready to talk</h2>
+              <p className="text-neutral-500 text-sm text-center max-w-[280px]">
+                Tap the button below to start chatting with Jane
+              </p>
+            </div>
+          )}
 
-                {/* Opportunities */}
-                {transcriptAnalysis.opportunities && transcriptAnalysis.opportunities.length > 0 && (
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <h4 className="text-blue-300 font-medium mb-2">🚀 Opportunities</h4>
-                    <ul className="space-y-2">
-                      {transcriptAnalysis.opportunities.map((opp, i) => (
-                        <li key={i} className="flex items-start text-white/80">
-                          <span className="text-blue-400 mr-2">•</span>
-                          <span>{opp}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+          {/* Chat Messages */}
+          <div className="space-y-4">
+            <ChatHistory chatHistory={chatHistory} />
 
-                {/* Red Flags */}
-                {transcriptAnalysis.red_flags && transcriptAnalysis.red_flags.length > 0 && (
-                  <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/20">
-                    <h4 className="text-red-300 font-medium mb-2">⚠️ Red Flags</h4>
-                    <ul className="space-y-2">
-                      {transcriptAnalysis.red_flags.map((flag, i) => (
-                        <li key={i} className="flex items-start text-white/80">
-                          <span className="text-red-400 mr-2">•</span>
-                          <span>{flag}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Session Info */}
-                <div className="flex items-center justify-between text-xs text-white/40 pt-2 border-t border-white/10">
-                  <span>Session: {transcriptAnalysis.session_id?.slice(0, 8)}...</span>
-                  <span>{transcriptAnalysis.message_count} messages</span>
-                  {transcriptAnalysis.token_usage && (
-                    <span>{transcriptAnalysis.token_usage.total_tokens} tokens</span>
-                  )}
+            {/* Live transcript */}
+            {transcript && (
+              <div className="flex justify-end">
+                <div className="bg-white text-black rounded-2xl rounded-tr-sm px-4 py-3 max-w-[85%] shadow-lg">
+                  <p className="text-sm">{transcript}</p>
                 </div>
               </div>
             )}
+
+            {/* Streaming response */}
+            {streamingResponse && (
+              <div className="flex justify-start">
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[85%]">
+                  <p className="text-sm text-neutral-200">
+                    {streamingResponse}
+                    {isAssistantSpeaking && <span className="inline-block w-2 h-2 bg-red-500 rounded-full ml-2 animate-pulse"></span>}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Processing indicator */}
+            {isProcessing && !streamingResponse && !transcript && (
+              <div className="flex justify-start">
+                <div className="bg-neutral-900/50 rounded-2xl px-4 py-3">
+                  <div className="flex space-x-1.5">
+                    <span className="w-2 h-2 bg-red-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                    <span className="w-2 h-2 bg-red-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                    <span className="w-2 h-2 bg-red-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Analysis Panel */}
+            {isAnalyzing && (
+              <div className="bg-neutral-900/50 border border-neutral-800 rounded-xl p-4 mt-6">
+                <div className="flex items-center text-sm text-neutral-400">
+                  <div className="flex space-x-1 mr-3">
+                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                  </div>
+                  <span>Analyzing conversation...</span>
+                </div>
+              </div>
+            )}
+
+            {transcriptAnalysis && !isAnalyzing && (
+              <div className="bg-gradient-to-b from-neutral-900 to-neutral-950 border border-neutral-800 rounded-xl p-5 mt-6">
+                <div className="flex justify-between items-start mb-4">
+                  <span className="text-xs uppercase tracking-wider text-red-500 font-medium">Conversation Analysis</span>
+                  <button
+                    onClick={() => setTranscriptAnalysis(null)}
+                    className="text-neutral-600 hover:text-white transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {transcriptAnalysis.error ? (
+                  <p className="text-red-400 text-sm">{transcriptAnalysis.error}</p>
+                ) : (
+                  <div className="space-y-4">
+                    {transcriptAnalysis.summary && (
+                      <p className="text-neutral-300 text-sm leading-relaxed">{transcriptAnalysis.summary}</p>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                      {transcriptAnalysis.industry && (
+                        <span className="px-3 py-1 bg-black border border-neutral-800 rounded-full text-neutral-300 text-xs">{transcriptAnalysis.industry}</span>
+                      )}
+                      {transcriptAnalysis.position && (
+                        <span className="px-3 py-1 bg-black border border-neutral-800 rounded-full text-neutral-300 text-xs">{transcriptAnalysis.position}</span>
+                      )}
+                      {transcriptAnalysis.sentiment && (
+                        <span className={`px-3 py-1 rounded-full text-xs border ${transcriptAnalysis.sentiment === 'positive' ? 'bg-green-950/50 border-green-800 text-green-400' :
+                          transcriptAnalysis.sentiment === 'negative' ? 'bg-red-950/50 border-red-800 text-red-400' :
+                            'bg-amber-950/50 border-amber-800 text-amber-400'
+                          }`}>{transcriptAnalysis.sentiment}</span>
+                      )}
+                    </div>
+
+                    {transcriptAnalysis.key_insights?.length > 0 && (
+                      <div className="pt-3 border-t border-neutral-800">
+                        <span className="text-xs uppercase tracking-wider text-neutral-500 block mb-2">Key Insights</span>
+                        <ul className="space-y-1.5">
+                          {transcriptAnalysis.key_insights.slice(0, 3).map((insight, i) => (
+                            <li key={i} className="text-neutral-400 text-sm flex items-start">
+                              <span className="text-red-500 mr-2">•</span>
+                              {insight}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Scroll anchor */}
+            <div ref={chatEndRef} />
           </div>
-        )}
+        </div>
+      </div>
+
+      {/* Bottom Controls - Fixed */}
+      <div className="sticky bottom-0 bg-gradient-to-t from-black via-black to-transparent pt-8 pb-6">
+        <div className="max-w-2xl mx-auto px-4">
+          {/* Status */}
+          <div className="flex items-center justify-center mb-4 text-xs space-x-3">
+            {isRecording && (
+              <span className="text-red-500 flex items-center">
+                <span className="w-2 h-2 bg-red-500 rounded-full mr-2 animate-pulse"></span>
+                Recording
+              </span>
+            )}
+            {isAssistantSpeaking && (
+              <span className="text-white flex items-center">
+                <span className="w-2 h-2 bg-white rounded-full mr-2"></span>
+                Speaking
+              </span>
+            )}
+            {!isRecording && !isAssistantSpeaking && (
+              <span className="text-neutral-600">Tap to speak</span>
+            )}
+          </div>
+
+          {/* Mic Button */}
+          <div className="flex justify-center">
+            <button
+              onClick={handleMicClick}
+              disabled={isProcessing || isAssistantSpeaking || (connectionStatus === 'error' && !isRecording)}
+              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 ${isRecording
+                ? 'bg-red-500 shadow-lg shadow-red-500/40 scale-110'
+                : 'bg-gradient-to-b from-neutral-800 to-neutral-900 border border-neutral-700 hover:border-neutral-600 hover:from-neutral-700 hover:to-neutral-800'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              {isRecording ? (
+                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+                </svg>
+              )}
+            </button>
+          </div>
+
+          {connectionStatus === 'error' && (
+            <div className="text-center mt-4">
+              <button
+                onClick={handleReconnect}
+                className="text-sm text-red-400 hover:text-red-300 transition-colors"
+              >
+                Connection lost. Tap to reconnect
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
