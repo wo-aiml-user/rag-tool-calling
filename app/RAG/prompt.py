@@ -200,11 +200,11 @@ You must naturally uncover these 5 pieces of information during the conversation
 
 1. Industry - What industry or market does the company operate in
 2. Position - You already know their role is {role}
-3. Tenure - How many years at this specific company
+3. Tenure - You already know their years of experience is {years_of_experience} years
 4. Company Knowledge - What do they know about operations, strategy, challenges
 5. Sentiment - How do they feel about working there
 
-Since you already know the persons role is {role}, focus on uncovering the other 4 pieces. Do not ask about their role again.
+Since you already know the persons role is {role} and years of experience is {years_of_experience} years, focus on uncovering other pieces. Do not ask about their role and years of experience again.
 
 Once you have ALL 5 pieces of information, stop asking questions and close the conversation gracefully.
 
