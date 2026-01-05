@@ -27,11 +27,25 @@ import traceback
 class GeminiVoiceSession:
     """Manages a real-time voice session using Gemini Live API."""
     
-    def __init__(self, session_id: str, client_ws: WebSocket, settings: Settings, max_turns: int = 20):
+    def __init__(
+        self, 
+        session_id: str, 
+        client_ws: WebSocket, 
+        settings: Settings, 
+        max_turns: int = 20,
+        name: str = "",
+        role: str = "",
+        years_of_experience: str = ""
+    ):
         self.session_id = session_id
         self.client_ws = client_ws
         self.settings = settings
         self.is_active = True
+        
+        # User context (collected before call)
+        self.user_name = name
+        self.user_role = role
+        self.user_years_of_experience = years_of_experience
         self.start_time: Optional[float] = None
         
         # Gemini session
@@ -78,8 +92,12 @@ class GeminiVoiceSession:
                 api_key=gemini_api_key,
             )
             
-            # Get the live config
-            config = get_gemini_live_config()
+            # Get the live config with user context
+            config = get_gemini_live_config(
+                name=self.user_name,
+                role=self.user_role,
+                years_of_experience=self.user_years_of_experience
+            )
             
             # Start the session task that manages the context manager
             self.session_task = asyncio.create_task(self._run_session(config))

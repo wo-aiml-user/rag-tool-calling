@@ -16,18 +16,27 @@ RECEIVE_SAMPLE_RATE = 24000
 GEMINI_VOICE_MODEL = "models/gemini-2.5-flash-native-audio-preview-09-2025"
 
 
-def get_gemini_live_config() -> types.LiveConnectConfig:
+def get_gemini_live_config(
+    name: str = "", 
+    role: str = "", 
+    years_of_experience: str = ""
+) -> types.LiveConnectConfig:
     """
     Get the Gemini Live API configuration for voice-to-voice conversations.
+    
+    Args:
+        name: User's name (collected before call)
+        role: User's role/position (collected before call)
+        years_of_experience: Years of frontend experience (collected before call)
     
     Returns:
         LiveConnectConfig for Gemini Live API connection
     """
-    logger.info("[VOICE_SERVICE] Building Gemini Live config")
+    logger.info(f"[VOICE_SERVICE] Building Gemini Live config for user: {name}, role: {role}, exp: {years_of_experience}")
     
-    # Get voice-optimized prompt from centralized prompt module
-    voice_prompt = get_voice_prompt()
-    logger.info("[VOICE_SERVICE] Loaded voice-optimized system instruction")
+    # Get voice-optimized prompt with user context
+    voice_prompt = get_voice_prompt(name=name, role=role, years_of_experience=years_of_experience)
+    logger.info("[VOICE_SERVICE] Loaded personalized voice system instruction")
     
     config = types.LiveConnectConfig(
         response_modalities=["AUDIO"],

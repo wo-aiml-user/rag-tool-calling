@@ -28,6 +28,12 @@ function App() {
   const [transcriptAnalysis, setTranscriptAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  // Pre-call form state
+  const [formSubmitted, setFormSubmitted] = useState(false);
+  const [userName, setUserName] = useState('');
+  const [userRole, setUserRole] = useState('');
+  const [yearsOfExperience, setYearsOfExperience] = useState('');
+
   const websocketRef = useRef(null);
   const audioContextRef = useRef(null);
   const playbackContextRef = useRef(null);
@@ -290,8 +296,13 @@ function App() {
         checkConnection();
       });
 
-      // Start voice agent session
-      websocketRef.current.send(JSON.stringify({ type: 'start_session' }));
+      // Start voice agent session with user context
+      websocketRef.current.send(JSON.stringify({
+        type: 'start_session',
+        name: userName,
+        role: userRole,
+        years_of_experience: yearsOfExperience
+      }));
       await new Promise(resolve => setTimeout(resolve, 500));
 
       // Request microphone access
@@ -468,48 +479,138 @@ function App() {
 
         <ChatHistory chatHistory={chatHistory} />
 
-        {transcript && (
-          <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 text-white/90">
-            <div className="flex items-start space-x-2">
-              <span className="text-blue-400 text-sm">You:</span>
-              <span>{transcript}</span>
-            </div>
-          </div>
-        )}
+        {/* Pre-call Form */}
+        {!formSubmitted ? (
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20">
+            <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
+              <span className="mr-2">📋</span> Before we start
+            </h2>
+            <p className="text-white/70 mb-4 text-sm">Please provide your details so Maya can personalize the conversation.</p>
 
-        {streamingResponse && (
-          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4">
-            <div className="flex items-start space-x-2">
-              <span className="text-purple-400 text-sm">
-                {isAssistantSpeaking ? '🔊 Assistant:' : 'Assistant:'}
-              </span>
-              <span className="text-white">{streamingResponse}</span>
-              {isAssistantSpeaking && <span className="animate-pulse text-purple-400">▋</span>}
-            </div>
-          </div>
-        )}
-
-        {response && !streamingResponse && !isAssistantSpeaking && <ResponseBubble response={response} />}
-
-        {isProcessing && !streamingResponse && !transcript && (
-          <div className="flex justify-center">
-            <div className="bg-white/10 backdrop-blur-sm rounded-full px-6 py-3 text-white">
-              <div className="flex items-center space-x-3">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                <span>🧠 Thinking...</span>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (userName && userRole && yearsOfExperience) {
+                setFormSubmitted(true);
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-white/80 text-sm mb-1">Your Name</label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  placeholder="Enter your name"
+                  required
+                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/40 focus:outline-none focus:border-purple-400 transition-colors"
+                />
               </div>
-            </div>
-          </div>
-        )}
 
-        <div className="flex justify-center pt-4">
-          <MicButton
-            isRecording={isRecording}
-            onRecordingStart={handleRecordingStart}
-            onRecordingStop={handleRecordingStop}
-            disabled={isProcessing || isAssistantSpeaking || (connectionStatus === 'error' && !isRecording)}
-          />
-        </div>
+              <div>
+                <label className="block text-white/80 text-sm mb-1">Your Role</label>
+                <select
+                  value={userRole}
+                  onChange={(e) => setUserRole(e.target.value)}
+                  required
+                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-400 transition-colors appearance-none cursor-pointer"
+                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px' }}
+                >
+                  <option value="" disabled className="bg-gray-800 text-white/40">Select your role</option>
+                  <option value="CEO" className="bg-gray-800">CEO</option>
+                  <option value="HR Manager" className="bg-gray-800">HR Manager</option>
+                  <option value="Sales Manager" className="bg-gray-800">Sales Manager</option>
+                  <option value="Developer" className="bg-gray-800">Developer</option>
+                  <option value="Business Development" className="bg-gray-800">Business Development</option>
+                  <option value="Product Manager" className="bg-gray-800">Product Manager</option>
+                  <option value="Engineering Manager" className="bg-gray-800">Engineering Manager</option>
+                  <option value="Operations Manager" className="bg-gray-800">Operations Manager</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-white/80 text-sm mb-1">Years of Frontend Experience</label>
+                <input
+                  type="number"
+                  value={yearsOfExperience}
+                  onChange={(e) => setYearsOfExperience(e.target.value)}
+                  placeholder="e.g., 5"
+                  min="0"
+                  max="50"
+                  required
+                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/40 focus:outline-none focus:border-purple-400 transition-colors"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white font-semibold py-3 rounded-lg transition-all transform hover:scale-[1.02]"
+              >
+                Start Conversation
+              </button>
+            </form>
+          </div>
+        ) : (
+          <>
+            {/* User Info Summary */}
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <span className="text-2xl">👤</span>
+                <div>
+                  <p className="text-white font-medium">{userName}</p>
+                  <p className="text-white/60 text-sm">{userRole} • {yearsOfExperience} years exp</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setFormSubmitted(false)}
+                className="text-white/40 hover:text-white text-sm underline"
+              >
+                Edit
+              </button>
+            </div>
+
+            {transcript && (
+              <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 text-white/90">
+                <div className="flex items-start space-x-2">
+                  <span className="text-blue-400 text-sm">You:</span>
+                  <span>{transcript}</span>
+                </div>
+              </div>
+            )}
+
+            {streamingResponse && (
+              <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4">
+                <div className="flex items-start space-x-2">
+                  <span className="text-purple-400 text-sm">
+                    {isAssistantSpeaking ? '🔊 Assistant:' : 'Assistant:'}
+                  </span>
+                  <span className="text-white">{streamingResponse}</span>
+                  {isAssistantSpeaking && <span className="animate-pulse text-purple-400">▋</span>}
+                </div>
+              </div>
+            )}
+
+            {response && !streamingResponse && !isAssistantSpeaking && <ResponseBubble response={response} />}
+
+            {isProcessing && !streamingResponse && !transcript && (
+              <div className="flex justify-center">
+                <div className="bg-white/10 backdrop-blur-sm rounded-full px-6 py-3 text-white">
+                  <div className="flex items-center space-x-3">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    <span>🧠 Thinking...</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-center pt-4">
+              <MicButton
+                isRecording={isRecording}
+                onRecordingStart={handleRecordingStart}
+                onRecordingStop={handleRecordingStop}
+                disabled={isProcessing || isAssistantSpeaking || (connectionStatus === 'error' && !isRecording)}
+              />
+            </div>
+          </>
+        )}
 
         {connectionStatus === 'error' && (
           <div className="text-center">

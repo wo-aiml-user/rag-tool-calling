@@ -51,8 +51,8 @@ async def websocket_voice_endpoint(
     await websocket.accept()
     logger.info(f"[{session_id}] Client connected")
     
-    session = GeminiVoiceSession(session_id, websocket, settings)
-    active_sessions[session_id] = session
+    # Session will be created when start_session is received with user context
+    session = None
     
     try:
         while True:
@@ -66,38 +66,61 @@ async def websocket_voice_endpoint(
                 msg_type = data.get("type")
                 
                 if msg_type == "start_session":
-                    logger.info(f"[{session_id}] Starting Gemini voice session...")
+                    # Extract user context from the message
+                    user_name = data.get("name", "")
+                    user_role = data.get("role", "") 
+                    user_experience = data.get("years_of_experience", "")
+                    
+                    logger.info(f"[{session_id}] Starting session for {user_name} ({user_role}, {user_experience} years exp)")
+                    
+                    # Create session with user context
+                    session = GeminiVoiceSession(
+                        session_id=session_id,
+                        client_ws=websocket,
+                        settings=settings,
+                        name=user_name,
+                        role=user_role,
+                        years_of_experience=user_experience
+                    )
+                    active_sessions[session_id] = session
+                    
                     success = await session.connect_and_run()
                     
                     if success:
                         # Send session started and audio config
                         await session.client_ws.send_text(json.dumps({
                             "type": "session_started",
-                            "session_id": session_id
+                            "session_id": session_id,
+                            "user_context": {
+                                "name": user_name,
+                                "role": user_role,
+                                "years_of_experience": user_experience
+                            }
                         }))
                         await session.client_ws.send_text(json.dumps({
                             "type": "audio_config",
                             "config": get_audio_config()
                         }))
                     else:
-                        await session.client_ws.send_text(json.dumps({
+                        await websocket.send_text(json.dumps({
                             "type": "error",
                             "message": "Failed to connect to Gemini Live API"
                         }))
                 
                 elif msg_type == "audio_chunk":
                     # Decode and forward audio to Gemini
-                    if "audio_data" in data:
+                    if session and "audio_data" in data:
                         audio_bytes = base64.b64decode(data["audio_data"])
                         await session.forward_audio_to_agent(audio_bytes)
                 
                 elif msg_type == "get_stats":
                     # Send current session stats
-                    stats = session.get_session_stats()
-                    await session.client_ws.send_text(json.dumps({
-                        "type": "session_stats",
-                        "stats": stats
-                    }))
+                    if session:
+                        stats = session.get_session_stats()
+                        await session.client_ws.send_text(json.dumps({
+                            "type": "session_stats",
+                            "stats": stats
+                        }))
                 
                 elif msg_type == "end_session":
                     logger.info(f"[{session_id}] Ending session...")
@@ -105,7 +128,8 @@ async def websocket_voice_endpoint(
             
             elif "bytes" in message:
                 # Raw binary audio - forward directly
-                await session.forward_audio_to_agent(message["bytes"])
+                if session:
+                    await session.forward_audio_to_agent(message["bytes"])
     
     except WebSocketDisconnect:
         logger.info(f"[{session_id}] Client disconnected")
@@ -114,7 +138,8 @@ async def websocket_voice_endpoint(
         import traceback
         traceback.print_exc()
     finally:
-        await session.close()
+        if session:
+            await session.close()
         if session_id in active_sessions:
             del active_sessions[session_id]
 
