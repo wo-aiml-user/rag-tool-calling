@@ -111,7 +111,7 @@ async def get_voice_agent_settings(settings: Settings, context: dict = None) -> 
                     "temperature": 0.7
                 },
                 "endpoint": {
-                    "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse",
+                    "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse",
                     "headers": {
                         "x-goog-api-key": settings.GEMINI_API_KEY
                     }

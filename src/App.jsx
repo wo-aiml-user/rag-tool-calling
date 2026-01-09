@@ -483,8 +483,6 @@ function App() {
   const handleMicClick = () => {
     if (isRecording) {
       handleRecordingStop();
-    } else if (!hasStartedOnce) {
-      setShowUserInfoModal(true);
     } else {
       handleRecordingStart();
     }
@@ -496,83 +494,7 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-neutral-950 to-black flex flex-col font-sans">
 
-      {/* User Info Modal */}
-      {showUserInfoModal && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
-          <div className="bg-gradient-to-b from-neutral-900 to-neutral-950 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-neutral-800">
-            <h3 className="text-white font-medium text-lg mb-1">
-              {hasStartedOnce ? 'Edit Profile' : 'Before we begin'}
-            </h3>
-            <p className="text-neutral-500 text-sm mb-5">
-              This helps personalize your conversation
-            </p>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-neutral-400 text-xs uppercase tracking-wider mb-1.5">Name</label>
-                <input
-                  type="text"
-                  value={userName}
-                  onChange={(e) => setUserName(e.target.value)}
-                  placeholder="Your name"
-                  autoFocus
-                  className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-white placeholder-neutral-600 text-sm focus:outline-none focus:border-red-500/50 transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-neutral-400 text-xs uppercase tracking-wider mb-1.5">Role</label>
-                <input
-                  type="text"
-                  value={userRole}
-                  onChange={(e) => setUserRole(e.target.value)}
-                  placeholder="e.g. Product Manager"
-                  className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-white placeholder-neutral-600 text-sm focus:outline-none focus:border-red-500/50 transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-neutral-400 text-xs uppercase tracking-wider mb-1.5">Industry</label>
-                <input
-                  type="text"
-                  value={userIndustry}
-                  onChange={(e) => setUserIndustry(e.target.value)}
-                  placeholder="e.g. Healthcare, Fintech"
-                  className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-white placeholder-neutral-600 text-sm focus:outline-none focus:border-red-500/50 transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-neutral-400 text-xs uppercase tracking-wider mb-1.5">Experience</label>
-                <input
-                  type="text"
-                  value={yearsOfExperience}
-                  onChange={(e) => setYearsOfExperience(e.target.value)}
-                  placeholder="e.g. 5 years"
-                  className="w-full bg-black border border-neutral-800 rounded-lg px-4 py-3 text-white placeholder-neutral-600 text-sm focus:outline-none focus:border-red-500/50 transition-colors"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowUserInfoModal(false);
-                  if (!hasStartedOnce) {
-                    handleRecordingStart();
-                  }
-                }}
-                className="flex-1 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white font-medium py-3 px-4 rounded-lg transition-all text-sm shadow-lg shadow-red-500/20"
-              >
-                {hasStartedOnce ? 'Save' : 'Start Conversation'}
-              </button>
-              <button
-                onClick={() => setShowUserInfoModal(false)}
-                className="px-4 py-3 text-neutral-500 hover:text-white transition-colors text-sm"
-              >
-                {hasStartedOnce ? 'Cancel' : 'Skip'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Main Content - Scrollable */}
       <div className="flex-1 overflow-y-auto">
@@ -662,7 +584,10 @@ function App() {
             {transcriptAnalysis && !isAnalyzing && (
               <div className="bg-gradient-to-b from-neutral-900 to-neutral-950 border border-neutral-800 rounded-xl p-5 mt-6">
                 <div className="flex justify-between items-start mb-4">
-                  <span className="text-xs uppercase tracking-wider text-red-500 font-medium">Conversation Analysis</span>
+                  <div>
+                    <span className="text-xs uppercase tracking-wider text-red-500 font-medium">AINA Diagnostic Report</span>
+                    <p className="text-neutral-500 text-xs mt-1">Preliminary Analysis for Implementation Team</p>
+                  </div>
                   <button
                     onClick={() => setTranscriptAnalysis(null)}
                     className="text-neutral-600 hover:text-white transition-colors"
@@ -676,37 +601,68 @@ function App() {
                 {transcriptAnalysis.error ? (
                   <p className="text-red-400 text-sm">{transcriptAnalysis.error}</p>
                 ) : (
-                  <div className="space-y-4">
-                    {transcriptAnalysis.summary && (
-                      <p className="text-neutral-300 text-sm leading-relaxed">{transcriptAnalysis.summary}</p>
+                  <div className="space-y-5">
+                    {/* Client Overview */}
+                    {transcriptAnalysis.client_overview && (
+                      <div>
+                        <span className="text-xs uppercase tracking-wider text-neutral-500 block mb-2">Client Overview</span>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {transcriptAnalysis.client_overview.industry && (
+                            <span className="px-3 py-1 bg-black border border-neutral-800 rounded-full text-neutral-300 text-xs">{transcriptAnalysis.client_overview.industry}</span>
+                          )}
+                          {transcriptAnalysis.client_overview.size && (
+                            <span className="px-3 py-1 bg-black border border-neutral-800 rounded-full text-neutral-300 text-xs">{transcriptAnalysis.client_overview.size}</span>
+                          )}
+                        </div>
+                        {transcriptAnalysis.client_overview.context && (
+                          <p className="text-neutral-400 text-sm">{transcriptAnalysis.client_overview.context}</p>
+                        )}
+                      </div>
                     )}
 
-                    <div className="flex flex-wrap gap-2">
-                      {transcriptAnalysis.industry && (
-                        <span className="px-3 py-1 bg-black border border-neutral-800 rounded-full text-neutral-300 text-xs">{transcriptAnalysis.industry}</span>
-                      )}
-                      {transcriptAnalysis.position && (
-                        <span className="px-3 py-1 bg-black border border-neutral-800 rounded-full text-neutral-300 text-xs">{transcriptAnalysis.position}</span>
-                      )}
-                      {transcriptAnalysis.sentiment && (
-                        <span className={`px-3 py-1 rounded-full text-xs border ${transcriptAnalysis.sentiment === 'positive' ? 'bg-green-950/50 border-green-800 text-green-400' :
-                          transcriptAnalysis.sentiment === 'negative' ? 'bg-red-950/50 border-red-800 text-red-400' :
-                            'bg-amber-950/50 border-amber-800 text-amber-400'
-                          }`}>{transcriptAnalysis.sentiment}</span>
-                      )}
-                    </div>
+                    {/* Primary Symptoms */}
+                    {transcriptAnalysis.primary_symptoms && (
+                      <div className="pt-4 border-t border-neutral-800">
+                        <span className="text-xs uppercase tracking-wider text-amber-500 block mb-2">Primary Symptoms</span>
+                        <p className="text-neutral-300 text-sm leading-relaxed">{transcriptAnalysis.primary_symptoms}</p>
+                      </div>
+                    )}
 
-                    {transcriptAnalysis.key_insights?.length > 0 && (
-                      <div className="pt-3 border-t border-neutral-800">
-                        <span className="text-xs uppercase tracking-wider text-neutral-500 block mb-2">Key Insights</span>
-                        <ul className="space-y-1.5">
-                          {transcriptAnalysis.key_insights.slice(0, 3).map((insight, i) => (
-                            <li key={i} className="text-neutral-400 text-sm flex items-start">
-                              <span className="text-red-500 mr-2">•</span>
-                              {insight}
-                            </li>
-                          ))}
-                        </ul>
+                    {/* Root Cause Analysis */}
+                    {transcriptAnalysis.root_cause_analysis && (
+                      <div className="pt-4 border-t border-neutral-800">
+                        <span className="text-xs uppercase tracking-wider text-red-500 block mb-2">Root Cause Analysis</span>
+                        <p className="text-neutral-300 text-sm leading-relaxed">{transcriptAnalysis.root_cause_analysis}</p>
+                      </div>
+                    )}
+
+                    {/* Gap Analysis */}
+                    {transcriptAnalysis.gap_analysis && (
+                      <div className="pt-4 border-t border-neutral-800">
+                        <span className="text-xs uppercase tracking-wider text-neutral-500 block mb-3">Gap Analysis</span>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-black/50 border border-neutral-800 rounded-lg p-3">
+                            <span className="text-xs text-neutral-500 block mb-1">Current State</span>
+                            <p className="text-neutral-400 text-sm">{transcriptAnalysis.gap_analysis.current_state || 'Not discussed'}</p>
+                          </div>
+                          <div className="bg-black/50 border border-green-900/30 rounded-lg p-3">
+                            <span className="text-xs text-green-600 block mb-1">Desired State</span>
+                            <p className="text-neutral-300 text-sm">{transcriptAnalysis.gap_analysis.desired_state || 'Not discussed'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Recommended Module */}
+                    {transcriptAnalysis.recommended_module && (
+                      <div className="pt-4 border-t border-neutral-800">
+                        <span className="text-xs uppercase tracking-wider text-green-500 block mb-2">Recommended AINA Module</span>
+                        <div className="bg-gradient-to-r from-green-950/30 to-transparent border border-green-900/30 rounded-lg p-4">
+                          <p className="text-green-400 font-medium text-sm mb-1">{transcriptAnalysis.recommended_module}</p>
+                          {transcriptAnalysis.recommendation_rationale && (
+                            <p className="text-neutral-400 text-xs">{transcriptAnalysis.recommendation_rationale}</p>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
