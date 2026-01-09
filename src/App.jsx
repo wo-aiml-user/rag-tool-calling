@@ -3,13 +3,8 @@ import MicButton from './components/MicButton';
 import ChatHistory from './components/ChatHistory';
 import { v4 as uuidv4 } from 'uuid';
 
-// Dynamic WebSocket URL based on current host
-const getWsUrl = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-  return `${protocol}//${host}`;
-};
-const WS_URL = getWsUrl();
+// WebSocket URL - point to backend server
+const WS_URL = 'ws://localhost:8000';
 
 // Audio configuration
 const INPUT_SAMPLE_RATE = 16000;
@@ -131,14 +126,16 @@ function App() {
     }
 
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      console.log('[WS] Already connected, skipping initialization');
       return;
     }
 
     const wsUrl = `${WS_URL}/api/ws/voice/${sessionIdRef.current}`;
+    console.log(`[WS] 🔌 Connecting to: ${wsUrl}`);
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      console.log('WebSocket connected');
+      console.log('[WS] ✅ WebSocket connected successfully');
       setConnectionStatus('connected');
     };
 
@@ -215,31 +212,32 @@ function App() {
           break;
 
         case 'error':
-          console.error('Server error:', data.message);
+          console.error('[WS] ❌ Server error:', data.message);
           setIsProcessing(false);
           setIsAnalyzing(false);
           setConnectionStatus('error');
           break;
 
         case 'transcript_analysis':
-          console.log('Transcript analysis received:', data.analysis);
+          console.log('[WS] 📊 Transcript analysis received:', data.analysis);
           setTranscriptAnalysis(data.analysis);
           setIsAnalyzing(false);
           break;
 
         default:
-          console.log('Unknown message type:', data.type, data);
+          console.log('[WS] 📨 Unknown message type:', data.type, data);
           break;
       }
     };
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      console.error('[WS] ❌ WebSocket error:', error);
+      console.error('[WS] Error details - readyState:', ws.readyState, 'url:', wsUrl);
       setConnectionStatus('error');
     };
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
+    ws.onclose = (event) => {
+      console.log(`[WS] 🔌 WebSocket disconnected - code: ${event.code}, reason: ${event.reason || 'none'}, clean: ${event.wasClean}`);
       if (connectionStatus !== 'error') {
         setConnectionStatus('ready');
       }

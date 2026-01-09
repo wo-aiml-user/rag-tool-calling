@@ -8,9 +8,6 @@ export default defineConfig({
     host: true,
     port: 3000,
     allowedHosts: ['.ngrok-free.app', '.ngrok.io'],
-    hmr: {
-      clientPort: 443,
-    },
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

@@ -12,18 +12,14 @@ from fastapi import WebSocket
 from loguru import logger
 from app.config import Settings
 from app.api.voice.services.voice_service import get_voice_agent_settings
-from app.RAG.prompt import get_transcript_analysis_prompt
-from tools.functions import get_current_weather, search_articles, retrieve_documents
-from app.RAG.gemini_client import GeminiClient
+from app.api.voice.services.prompt import get_transcript_analysis_prompt
+from app.api.voice.models.gemini_client import GeminiClient
 import traceback
 from typing import List, Dict
 
 
 # Deepgram Voice Agent V1 endpoint
 VOICE_AGENT_URL = "wss://agent.deepgram.com/v1/agent/converse"
-
-# Default collection for voice document retrieval
-DEFAULT_COLLECTION = "tool_calling_dev"
 
 
 class VoiceAgentSession:
@@ -48,9 +44,14 @@ class VoiceAgentSession:
         """
         try:
             deepgram_api_key = self.settings.DEEPGRAM_API_KEY
+            
+            # Log API key status (masked for security)
             if not deepgram_api_key:
-                logger.error(f"[{self.session_id}] DEEPGRAM_API_KEY not configured")
+                logger.error(f"[{self.session_id}] DEEPGRAM_API_KEY is empty or not configured")
                 return False
+            else:
+                masked_key = f"{deepgram_api_key[:8]}...{deepgram_api_key[-4:]}" if len(deepgram_api_key) > 12 else "***"
+                logger.info(f"[{self.session_id}] DEEPGRAM_API_KEY found: {masked_key}")
             
             logger.info(f"[{self.session_id}] Connecting to Deepgram Voice Agent at {VOICE_AGENT_URL}...")
             
@@ -58,7 +59,7 @@ class VoiceAgentSession:
             self.agent_ws = await asyncio.wait_for(
                 websockets.connect(
                     VOICE_AGENT_URL,
-                    additional_headers={"Authorization": f"Token {deepgram_api_key}"},
+                    extra_headers={"Authorization": f"Token {deepgram_api_key}"},
                     ping_interval=20,
                     ping_timeout=20,
                 ),
@@ -67,16 +68,25 @@ class VoiceAgentSession:
             logger.info(f"[{self.session_id}] Connected to Deepgram Voice Agent")
             
             # Send Settings message to configure the agent (with user context for personalized prompt)
+            logger.info(f"[{self.session_id}] Sending settings to Voice Agent...")
             settings_dict = await get_voice_agent_settings(self.settings, context=context)
+            logger.debug(f"[{self.session_id}] Settings payload: {json.dumps(settings_dict, indent=2)[:500]}")
             await self.agent_ws.send(json.dumps(settings_dict))
-            logger.info(f"[{self.session_id}] Sent Settings to Voice Agent")
+            logger.info(f"[{self.session_id}] Settings sent to Voice Agent")
             
             return True
         except asyncio.TimeoutError:
             logger.error(f"[{self.session_id}] Connection to Deepgram timed out after 30s. Check network/firewall.")
             return False
+        except websockets.exceptions.InvalidStatusCode as e:
+            logger.error(f"[{self.session_id}] Deepgram rejected connection with status {e.status_code}")
+            if e.status_code == 401:
+                logger.error(f"[{self.session_id}] Invalid API key - check your DEEPGRAM_API_KEY")
+            elif e.status_code == 403:
+                logger.error(f"[{self.session_id}] API key doesn't have voice agent permissions")
+            return False
         except Exception as e:
-            logger.error(f"[{self.session_id}] Failed to connect to Voice Agent: {e}")
+            logger.error(f"[{self.session_id}] Failed to connect to Voice Agent: {type(e).__name__}: {e}")
             traceback.print_exc()
             return False
 
@@ -134,97 +144,6 @@ class VoiceAgentSession:
                     
         except Exception as e:
             logger.error(f"[{self.session_id}] Error receiving from agent: {e}")
-    
-    async def _execute_function(self, function_name: str, arguments: dict) -> str:
-        """
-        Execute a function and return the result as a JSON string.
-        Logs each step like the chat module for debugging.
-        """
-        start_time = time.perf_counter()
-        
-        logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Starting execution: {function_name}")
-        logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Arguments: {json.dumps(arguments)}")
-        
-        try:
-            if function_name == "get_current_weather":
-                location = arguments.get("location", "")
-                unit = arguments.get("unit", "celsius")
-                
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Weather lookup: location={location}, unit={unit}")
-                
-                result = get_current_weather(location=location, unit=unit)
-                
-                elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Weather result: {result.get('description', 'N/A')}, temp={result.get('temperature', 'N/A')}° | took {elapsed_ms}ms")
-                return json.dumps(result)
-            
-            elif function_name == "search_articles":
-                query = arguments.get("query", "")
-                max_results = arguments.get("max_results", 2)
-                
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Web search: query='{query}', max_results={max_results}")
-                
-                result = search_articles(query=query, max_results=max_results)
-                
-                elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-                content_preview = str(result)[:150] if result else "No results"
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Search result: {content_preview}... | took {elapsed_ms}ms")
-                return json.dumps(result)
-            
-            elif function_name == "retrieve_documents":
-                query = arguments.get("query", "")
-                file_ids = arguments.get("file_ids", None)
-                
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Document retrieval: query='{query}', collection={DEFAULT_COLLECTION}")
-                
-                # Use retrieve_documents from tools/functions.py
-                documents, token_usage = retrieve_documents(
-                    query=query,
-                    collection_name=DEFAULT_COLLECTION,
-                    file_ids=file_ids,
-                    top_k=5  # Fewer docs for voice to keep response concise
-                )
-                
-                elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-                logger.info(f"[VOICE_FUNCTION] [{self.session_id}] Retrieved {len(documents)} documents | tokens={token_usage} | took {elapsed_ms}ms")
-                
-                if documents:
-                    # Format documents for voice response
-                    doc_summaries = []
-                    for i, doc in enumerate(documents[:3]):  # Top 3 for voice
-                        content_preview = doc.page_content[:200].replace('\n', ' ')
-                        doc_summaries.append({
-                            "index": i + 1,
-                            "file": doc.metadata.get("file_name", "Unknown"),
-                            "content": content_preview,
-                            "score": round(doc.metadata.get("score", 0), 3)
-                        })
-                        logger.debug(f"[VOICE_FUNCTION] [{self.session_id}] Doc {i+1}: {doc.metadata.get('file_name', 'Unknown')} (score={doc.metadata.get('score', 0):.3f})")
-                    
-                    result = {
-                        "found": True,
-                        "count": len(documents),
-                        "documents": doc_summaries,
-                        "message": f"Found {len(documents)} relevant documents"
-                    }
-                else:
-                    result = {
-                        "found": False,
-                        "count": 0,
-                        "message": "No relevant documents found for this query"
-                    }
-                
-                return json.dumps(result)
-            
-            else:
-                logger.warning(f"[VOICE_FUNCTION] [{self.session_id}] Unknown function: {function_name}")
-                return json.dumps({"error": f"Unknown function: {function_name}"})
-                
-        except Exception as e:
-            elapsed_ms = int((time.perf_counter() - start_time) * 1000)
-            logger.error(f"[VOICE_FUNCTION] [{self.session_id}] Error in {function_name} after {elapsed_ms}ms: {e}")
-            traceback.print_exc()
-            return json.dumps({"error": str(e)})
     
     async def _handle_agent_message(self, msg: str):
         """Handle JSON message from Deepgram Voice Agent."""
@@ -295,68 +214,6 @@ class VoiceAgentSession:
                     "text": content
                 }))
         
-        elif msg_type == "FunctionCallRequest":
-            # Deepgram is requesting us to execute a function
-            # This happens when client_side: true
-            functions = data.get("functions", [])
-            logger.info(f"[{self.session_id}] Agent | FunctionCallRequest: {data}")
-            
-            for func in functions:
-                func_id = func.get("id", "")
-                func_name = func.get("name", "")
-                func_args_str = func.get("arguments", "{}")
-                
-                # Parse arguments
-                try:
-                    func_args = json.loads(func_args_str) if isinstance(func_args_str, str) else func_args_str
-                except json.JSONDecodeError:
-                    func_args = {}
-                
-                logger.info(f"[{self.session_id}] Agent | Executing: {func_name}({func_args})")
-                
-                # Execute the function
-                result = await self._execute_function(func_name, func_args)
-                
-                logger.info(f"[{self.session_id}] Agent | Function result: {result}")
-                
-                # Send FunctionCallResponse back to Deepgram
-                response = {
-                    "type": "FunctionCallResponse",
-                    "id": func_id,
-                    "name": func_name,
-                    "content": result
-                }
-                
-                await self.agent_ws.send(json.dumps(response))
-                logger.info(f"[{self.session_id}] Agent | Sent FunctionCallResponse for {func_name}")
-                
-                # Notify client
-                await self.client_ws.send_text(json.dumps({
-                    "type": "function_executed",
-                    "name": func_name,
-                    "result": result
-                }))
-                
-        elif msg_type == "FunctionCall":
-            # Legacy handler - tool/function call from agent (server-side)
-            function_name = data.get("name", "")
-            function_args = data.get("arguments", {})
-            logger.info(f"[{self.session_id}] Agent | Function call: {function_name}({function_args})")
-            await self.client_ws.send_text(json.dumps({
-                "type": "function_call",
-                "name": function_name,
-                "arguments": function_args
-            }))
-            
-        elif msg_type == "FunctionCallResult":
-            # Result of function call
-            result = data.get("result", "")
-            logger.info(f"[{self.session_id}] Agent | Function result received")
-            await self.client_ws.send_text(json.dumps({
-                "type": "function_result",
-                "result": result
-            }))
-                
         elif msg_type == "Error":
             error_msg = data.get("message", "Unknown error")
             logger.error(f"[{self.session_id}] Agent | Error: {error_msg}")
@@ -429,20 +286,8 @@ class VoiceAgentSession:
             return {"error": str(e), "conversation_history": self.conversation_history}
     
     async def close(self):
-        """Close the Voice Agent connection and analyze transcript."""
+        """Close the Voice Agent connection."""
         self.is_active = False
-        
-        # Analyze conversation before closing
-        if self.conversation_history:
-            try:
-                analysis = await self.post_transcript()
-                # Send analysis to client
-                await self.client_ws.send_text(json.dumps({
-                    "type": "transcript_analysis",
-                    "analysis": analysis
-                }))
-            except Exception as e:
-                logger.error(f"[{self.session_id}] Error sending analysis: {e}")
         
         if self.agent_ws:
             try:

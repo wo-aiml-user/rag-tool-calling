@@ -1,6 +1,6 @@
 """
 DeepSeek client wrapper using OpenAI SDK.
-Provides chat completions with tool calling support.
+Provides chat completions.
 """
 import os
 from typing import List, Dict, Any, Optional
@@ -12,7 +12,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 class DeepSeekClient:
     """
     DeepSeek client wrapper using OpenAI SDK.
-    Supports chat completions and tool calling.
+    Supports chat completions.
     """
     
     def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-chat"):
@@ -40,18 +40,14 @@ class DeepSeekClient:
     def chat_completion(
         self,
         messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None,
         temperature: float = 0.6,
         max_tokens: Optional[int] = None
     ) -> Any:
         """
-        Create a chat completion with optional tool calling.
+        Create a chat completion.
         
         Args:
             messages: List of message dictionaries
-            tools: Optional list of tool definitions
-            tool_choice: Optional tool choice strategy ("auto", "none", or specific tool)
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
             
@@ -67,11 +63,6 @@ class DeepSeekClient:
             
             if max_tokens:
                 kwargs["max_tokens"] = max_tokens
-            
-            if tools:
-                kwargs["tools"] = tools
-                if tool_choice:
-                    kwargs["tool_choice"] = tool_choice
             
             response = self.client.chat.completions.create(**kwargs)
             return response

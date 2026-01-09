@@ -43,8 +43,7 @@ async def websocket_voice_endpoint(
     - audio_chunk: Audio data from TTS (base64 encoded)
     - transcript: User speech transcript
     - response: Agent text response
-    - function_call: Agent called a function/tool
-    - function_result: Result of function call
+
     - error: Error message
     """
     await websocket.accept()
@@ -70,11 +69,13 @@ async def websocket_voice_endpoint(
                     if user_context:
                         logger.info(f"[{session_id}] Starting session with context: {user_context}")
                     else:
-                        logger.info(f"[{session_id}] Starting voice agent session...")
+                        logger.info(f"[{session_id}] Starting voice agent session (no context)")
                     
+                    logger.info(f"[{session_id}] Attempting to connect to Deepgram...")
                     success = await session.connect_to_agent(context=user_context)
                     
                     if success:
+                        logger.info(f"[{session_id}]  Voice agent connected successfully")
                         # Start receiving from agent in background
                         asyncio.create_task(session.receive_from_agent())
                         await session.client_ws.send_text(json.dumps({
@@ -82,6 +83,7 @@ async def websocket_voice_endpoint(
                             "session_id": session_id
                         }))
                     else:
+                        logger.error(f"[{session_id}]  Failed to connect to voice agent")
                         await session.client_ws.send_text(json.dumps({
                             "type": "error",
                             "message": "Failed to connect to voice agent"
@@ -94,7 +96,22 @@ async def websocket_voice_endpoint(
                         await session.forward_audio_to_agent(audio_bytes)
                 
                 elif msg_type == "end_session":
-                    logger.info(f"[{session_id}] Ending session...")
+                    logger.info(f"[{session_id}] Ending session, starting transcript analysis...")
+                    
+                    # Do transcript analysis BEFORE closing the connection
+                    if session.conversation_history:
+                        try:
+                            analysis = await session.post_transcript()
+                            await session.client_ws.send_text(json.dumps({
+                                "type": "transcript_analysis",
+                                "analysis": analysis
+                            }))
+                            logger.info(f"[{session_id}]  Transcript analysis sent")
+                        except Exception as e:
+                            logger.error(f"[{session_id}]  Error sending analysis: {e}")
+                    else:
+                        logger.info(f"[{session_id}] No conversation history to analyze")
+                    
                     break
             
             elif "bytes" in message:

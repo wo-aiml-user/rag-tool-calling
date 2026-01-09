@@ -9,11 +9,6 @@ class Settings(BaseSettings):
     APP_NAME: str = "FastAPI Project"
     DEBUG: bool = False
 
-    # JWT configuration
-    JWT_SECRET_KEY: str = "your-secret-key-here"  # Change this in production!
-    JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-
     # Server configuration
     HOST: str = "0.0.0.0"
     PORT: int = 8000
@@ -25,15 +20,6 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = ""  # Empty by default, set to comma-separated list of domains or "*" for all
     CORS_METHODS: list = ["*"]
     CORS_HEADERS: list = ["*"]
-
-    # Milvus configuration
-    MILVUS_URI: str = "http://localhost:19530"
-    MILVUS_TOKEN: str = ""
-    MILVUS_DB_NAME: str = "TOOLS_DEV"
-    MILVUS_ALIAS: str = "default"
-
-    # Voyage AI configuration
-    VOYAGE_API_KEY: str = ""
     
     # DeepSeek configuration
     DEEPSEEK_API_KEY: str = ""
@@ -41,17 +27,8 @@ class Settings(BaseSettings):
     # Gemini configuration
     GEMINI_API_KEY: str = ""
 
-    #perplexity configuration
-    PERPLEXITY_API_KEY: str = ""
-
-    #openweather configuration
-    OPENWEATHER_API_KEY: str = ""
-
     # Deepgram configuration (for voice agent)
     DEEPGRAM_API_KEY: str = ""
-
-    #groq configuration
-    XAI_API_KEY: str = ""
     
     # Environment-specific settings (for dynamic behavior)
     ENVIRONMENT: str = "development"  # Default to development
@@ -59,6 +36,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"  # Single .env file for all environments
         case_sensitive = True
+        extra = "ignore"  # Ignore extra env vars not defined in Settings
 
 
 @lru_cache()
