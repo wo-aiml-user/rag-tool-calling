@@ -59,7 +59,7 @@ class VoiceAgentSession:
             self.agent_ws = await asyncio.wait_for(
                 websockets.connect(
                     VOICE_AGENT_URL,
-                    extra_headers={"Authorization": f"Token {deepgram_api_key}"},
+                    additional_headers={"Authorization": f"Token {deepgram_api_key}"},
                     ping_interval=20,
                     ping_timeout=20,
                 ),
