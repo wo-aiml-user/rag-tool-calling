@@ -56,10 +56,9 @@ def setup_routes(app: FastAPI):
 
         return _error_response(error_message, status.HTTP_422_UNPROCESSABLE_ENTITY)
 
+    @app.get("/")
+    async def health_check():
+        return {"status": "ok", "message": "Voice Assistant API is running"}
+
     # Include voice router
     app.include_router(voice_router, prefix="/api", tags=["Voice"])
-
-
-@app.get("/")
-async def health_check():
-    return {"status": "ok", "message": "Voice Assistant API is running"}
