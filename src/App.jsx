@@ -4,7 +4,19 @@ import ChatHistory from './components/ChatHistory';
 import { v4 as uuidv4 } from 'uuid';
 
 // WebSocket URL - point to backend server
-const WS_URL = 'ws://localhost:8000';
+// WebSocket URL - point to backend server
+const getWebSocketUrl = () => {
+  // Check for backend URL in environment variables (e.g. Render URL)
+  const backendUrl = import.meta.env.VITE_API_BASE_URL;
+  if (backendUrl) {
+    // Replace http/https with ws/wss
+    return backendUrl.replace(/^http/, 'ws');
+  }
+  // Fallback: Connect to the same host (working with Vite proxy/ngrok)
+  return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+};
+
+const WS_URL = getWebSocketUrl();
 
 // Audio configuration
 const INPUT_SAMPLE_RATE = 16000;
