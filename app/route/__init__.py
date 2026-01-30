@@ -58,3 +58,8 @@ def setup_routes(app: FastAPI):
 
     # Include voice router
     app.include_router(voice_router, prefix="/api", tags=["Voice"])
+
+
+@app.get("/")
+async def health_check():
+    return {"status": "ok", "message": "Voice Assistant API is running"}
