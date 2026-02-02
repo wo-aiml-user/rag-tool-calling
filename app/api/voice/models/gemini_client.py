@@ -44,7 +44,7 @@ class GeminiClient:
     Provides OpenAI-compatible interface for easy migration.
     """
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-flash-latest"):
         """
         Initialize Gemini client.
         
